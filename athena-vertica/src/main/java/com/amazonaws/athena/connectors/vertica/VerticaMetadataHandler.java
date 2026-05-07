@@ -149,13 +149,13 @@ public class VerticaMetadataHandler
         List<String> schemas = new ArrayList<>();
         try (Connection client = getJdbcConnectionFactory().getConnection(getCredentialProvider())) {
             DatabaseMetaData dbMetadata = client.getMetaData();
-            ResultSet rs  = dbMetadata.getTables(null, null, null, TABLE_TYPES);
-
-            while (rs.next())
-            {
-                if(!schemas.contains(rs.getString(TABLE_SCHEMA)))
+            try (ResultSet rs  = dbMetadata.getTables(null, null, null, TABLE_TYPES)) {
+                while (rs.next())
                 {
-                    schemas.add(rs.getString(TABLE_SCHEMA));
+                    if(!schemas.contains(rs.getString(TABLE_SCHEMA)))
+                    {
+                        schemas.add(rs.getString(TABLE_SCHEMA));
+                    }
                 }
             }
         }
@@ -188,8 +188,8 @@ public class VerticaMetadataHandler
         queryPassthrough.verify(getTableRequest.getQueryPassthroughArguments());
         String customerPassedQuery = getTableRequest.getQueryPassthroughArguments().get(JdbcQueryPassthrough.QUERY);
 
-        try (Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider())) {
-            PreparedStatement preparedStatement = connection.prepareStatement(customerPassedQuery);
+        try (Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider());
+                PreparedStatement preparedStatement = connection.prepareStatement(customerPassedQuery)) {
             ResultSetMetaData metadata = preparedStatement.getMetaData();
             if (metadata == null) {
                 throw new UnsupportedOperationException("Query not supported: ResultSetMetaData not available for query: " + customerPassedQuery);
@@ -229,16 +229,16 @@ public class VerticaMetadataHandler
     public GetTableResponse doGetTable(BlockAllocator allocator, GetTableRequest request) throws Exception
     {
         Set<String> partitionCols = new HashSet<>();
-        Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider());
+        try (Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider())) {
+            //build the schema as per columns in Vertica
+            Schema schema = verticaSchemaUtils.buildTableSchema(connection, request.getTableName());
 
-        //build the schema as per columns in Vertica
-        Schema schema = verticaSchemaUtils.buildTableSchema(connection, request.getTableName());
-
-        return new GetTableResponse(request.getCatalogName(),
-                request.getTableName(),
-                schema,
-                partitionCols
-        );
+            return new GetTableResponse(request.getCatalogName(),
+                    request.getTableName(),
+                    schema,
+                    partitionCols
+            );
+        }
     }
 
     /**
@@ -278,28 +278,27 @@ public class VerticaMetadataHandler
         String randomStr = UUID.randomUUID().toString();
         String queryID = request.getQueryId().replace("-","").concat(randomStr);
 
-        //Build the SQL query
-        Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider());
-
         // if  QPT get input query from Athena console
         //else old logic
 
         VerticaExportQueryBuilder queryBuilder = queryFactory.createVerticaExportQueryBuilder();
         String preparedSQLStmt;
 
-        if (!request.getTableName().getQualifiedTableName().equalsIgnoreCase(queryPassthrough.getFunctionSignature())) {
+        try (Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider())) {
+            if (!request.getTableName().getQualifiedTableName().equalsIgnoreCase(queryPassthrough.getFunctionSignature())) {
 
-            DatabaseMetaData dbMetadata = connection.getMetaData();
-            ResultSet definition = dbMetadata.getColumns(null, tableName.getSchemaName(), tableName.getTableName(), null);
-
-            preparedSQLStmt = queryBuilder.withS3ExportBucket(s3ExportBucket)
-                    .withQueryID(queryID)
-                    .withColumns(definition, schemaName)
-                    .fromTable(tableName.getSchemaName(), tableName.getTableName())
-                    .withConstraints(constraints, schemaName)
-                    .build();
-        } else {
-            preparedSQLStmt = null;
+                DatabaseMetaData dbMetadata = connection.getMetaData();
+                try (ResultSet definition = dbMetadata.getColumns(null, tableName.getSchemaName(), tableName.getTableName(), null)) {
+                    preparedSQLStmt = queryBuilder.withS3ExportBucket(s3ExportBucket)
+                            .withQueryID(queryID)
+                            .withColumns(definition, schemaName)
+                            .fromTable(tableName.getSchemaName(), tableName.getTableName())
+                            .withConstraints(constraints, schemaName)
+                            .build();
+                }
+            } else {
+                preparedSQLStmt = null;
+            }
         }
 
         logger.info("Vertica Export Statement: {}", preparedSQLStmt);
@@ -334,93 +333,95 @@ public class VerticaMetadataHandler
     public GetSplitsResponse doGetSplits(BlockAllocator allocator, GetSplitsRequest request)
     {
         //ToDo: implement use of a continuation token to use in case of larger queries
-        Connection connection;
-        try {
-            connection = getJdbcConnectionFactory().getConnection(getCredentialProvider());
-        } catch (Exception e) {
-            throw new RuntimeException("connection failed ", e);
-        }
-        Set<Split> splits = new HashSet<>();
-        String exportBucket = getS3ExportBucket();
-        String queryId = request.getQueryId().replace("-","");
-        Constraints constraints  = request.getConstraints();
-        String s3ExportBucket = getS3ExportBucket();
-        String sqlStatement;
-        //testing if the user has access to the requested table
+        try (Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider())) {
+            Set<Split> splits = new HashSet<>();
+            String exportBucket = getS3ExportBucket();
+            String queryId = request.getQueryId().replace("-","");
+            Constraints constraints  = request.getConstraints();
+            String s3ExportBucket = getS3ExportBucket();
+            String sqlStatement;
+            //testing if the user has access to the requested table
 
-        FieldReader fieldReaderQid = request.getPartitions().getFieldReader("queryId");
-        String queryID  = fieldReaderQid.readText().toString();
+            FieldReader fieldReaderQid = request.getPartitions().getFieldReader("queryId");
+            String queryID  = fieldReaderQid.readText().toString();
 
-        //get the SQL statement which was created in getPartitions
-        FieldReader fieldReaderPS = request.getPartitions().getFieldReader("preparedStmt");
-        if (constraints.isQueryPassThrough()) {
-            String preparedSQL = buildQueryPassthroughSql(constraints);
+            //get the SQL statement which was created in getPartitions
+            FieldReader fieldReaderPS = request.getPartitions().getFieldReader("preparedStmt");
+            if (constraints.isQueryPassThrough()) {
+                String preparedSQL = buildQueryPassthroughSql(constraints);
 
-            VerticaExportQueryBuilder queryBuilder = queryFactory.createQptVerticaExportQueryBuilder();
-            sqlStatement = queryBuilder.withS3ExportBucket(s3ExportBucket)
-                    .withQueryID(queryID)
-                    .withPreparedStatementSQL(preparedSQL).build();
-            logger.info("Vertica Export Statement: {}", sqlStatement);
-        }
-        else {
-            testAccess(connection, request.getTableName());
-            sqlStatement = fieldReaderPS.readText().toString();
-        }
-        String catalogName = request.getCatalogName();
+                VerticaExportQueryBuilder queryBuilder = queryFactory.createQptVerticaExportQueryBuilder();
+                sqlStatement = queryBuilder.withS3ExportBucket(s3ExportBucket)
+                        .withQueryID(queryID)
+                        .withPreparedStatementSQL(preparedSQL).build();
+                logger.info("Vertica Export Statement: {}", sqlStatement);
+            }
+            else {
+                testAccess(connection, request.getTableName());
+                sqlStatement = fieldReaderPS.readText().toString();
+            }
+            String catalogName = request.getCatalogName();
 
-        FieldReader fieldReaderAwsRegion = request.getPartitions().getFieldReader("awsRegionSql");
-        String awsRegionSql  = fieldReaderAwsRegion.readText().toString();
+            FieldReader fieldReaderAwsRegion = request.getPartitions().getFieldReader("awsRegionSql");
+            String awsRegionSql  = fieldReaderAwsRegion.readText().toString();
 
-        // Split the string by the first occurrence of "/"
-        String[] s3ExportBucketPath = exportBucket.split(SEPARATOR, 2); // The '2' limits the split to 2 parts
-        String s3ExportBucketName;
-        String remainingPath;
+            // Split the string by the first occurrence of "/"
+            String[] s3ExportBucketPath = exportBucket.split(SEPARATOR, 2); // The '2' limits the split to 2 parts
+            String s3ExportBucketName;
+            String remainingPath;
 
-        if (s3ExportBucketPath.length == 2) {
-            s3ExportBucketName = s3ExportBucketPath[0];
-            remainingPath = s3ExportBucketPath[1] + SEPARATOR;
-        } else {
-            s3ExportBucketName = s3ExportBucket;
-            remainingPath = "";
-        }
-        String prefix = remainingPath + queryId;
+            if (s3ExportBucketPath.length == 2) {
+                s3ExportBucketName = s3ExportBucketPath[0];
+                remainingPath = s3ExportBucketPath[1] + SEPARATOR;
+            } else {
+                s3ExportBucketName = s3ExportBucket;
+                remainingPath = "";
+            }
+            String prefix = remainingPath + queryId;
 
-        List<S3Object> s3ObjectsList = getlistExportedObjects(s3ExportBucketName, prefix);
-        if (s3ObjectsList.isEmpty()) {
-            // Execute queries on Vertica if S3 export bucket does not contain objects for given queryId
-            executeQueriesOnVertica(connection, sqlStatement, awsRegionSql);
-            // Retrieve the S3 objects list for given queryId
-            s3ObjectsList = getlistExportedObjects(s3ExportBucketName, prefix);
-        }
+            List<S3Object> s3ObjectsList = getlistExportedObjects(s3ExportBucketName, prefix);
+            if (s3ObjectsList.isEmpty()) {
+                // Execute queries on Vertica if S3 export bucket does not contain objects for given queryId
+                executeQueriesOnVertica(connection, sqlStatement, awsRegionSql);
+                // Retrieve the S3 objects list for given queryId
+                s3ObjectsList = getlistExportedObjects(s3ExportBucketName, prefix);
+            }
 
-        Split split;
+            Split split;
 
-        // Create a split for each s3 object
-        if(!s3ObjectsList.isEmpty())
-        {
-            for (S3Object s3Object : s3ObjectsList)
+            // Create a split for each s3 object
+            if(!s3ObjectsList.isEmpty())
             {
+                for (S3Object s3Object : s3ObjectsList)
+                {
+                    split = Split.newBuilder(makeSpillLocation(request), makeEncryptionKey())
+                            .add(VERTICA_SPLIT_QUERY_ID, queryID)
+                            .add(VERTICA_SPLIT_EXPORT_BUCKET, s3ExportBucketName)
+                            .add(VERTICA_SPLIT_OBJECT_KEY, s3Object.key())
+                            .build();
+                    splits.add(split);
+
+                }
+                return new GetSplitsResponse(catalogName, splits);
+            }
+            else
+            {
+                //No records were exported by Vertica for the issued query, creating a "empty" split
+                logger.info("No records were exported by Vertica");
                 split = Split.newBuilder(makeSpillLocation(request), makeEncryptionKey())
                         .add(VERTICA_SPLIT_QUERY_ID, queryID)
-                        .add(VERTICA_SPLIT_EXPORT_BUCKET, s3ExportBucketName)
-                        .add(VERTICA_SPLIT_OBJECT_KEY, s3Object.key())
+                        .add(VERTICA_SPLIT_EXPORT_BUCKET, exportBucket)
+                        .add(VERTICA_SPLIT_OBJECT_KEY, EMPTY_STRING)
                         .build();
                 splits.add(split);
-
+                return new GetSplitsResponse(catalogName,split);
             }
-            return new GetSplitsResponse(catalogName, splits);
         }
-        else
-        {
-            //No records were exported by Vertica for the issued query, creating a "empty" split
-            logger.info("No records were exported by Vertica");
-            split = Split.newBuilder(makeSpillLocation(request), makeEncryptionKey())
-                    .add(VERTICA_SPLIT_QUERY_ID, queryID)
-                    .add(VERTICA_SPLIT_EXPORT_BUCKET, exportBucket)
-                    .add(VERTICA_SPLIT_OBJECT_KEY, EMPTY_STRING)
-                    .build();
-            splits.add(split);
-            return new GetSplitsResponse(catalogName,split);
+        catch (RuntimeException e) {
+            throw e;
+        }
+        catch (Exception e) {
+            throw new RuntimeException("Exception generating splits", e);
         }
 
     }
@@ -431,10 +432,8 @@ public class VerticaMetadataHandler
      */
     private void executeQueriesOnVertica(Connection connection, String sqlStatement, String awsRegionSql)
     {
-        try {
-            PreparedStatement setAwsRegion = connection.prepareStatement(awsRegionSql);
-            PreparedStatement exportSQL = connection.prepareStatement(sqlStatement);
-
+        try (PreparedStatement setAwsRegion = connection.prepareStatement(awsRegionSql);
+                PreparedStatement exportSQL = connection.prepareStatement(sqlStatement)) {
             //execute the query to set region
             setAwsRegion.execute();
 
@@ -467,9 +466,9 @@ public class VerticaMetadataHandler
     private void testAccess(Connection conn, TableName table) {
         String sql = "SELECT * FROM " + PredicateBuilder.getFromClauseWithSplit(table.getSchemaName(), table.getTableName()) + " LIMIT 1";
         logger.info("Checking if the user has access to {}.{}", table.getSchemaName(), table.getTableName());
-        try {
-            PreparedStatement testAccessSql = conn.prepareStatement(sql);
-            ResultSet resultSet = testAccessSql.executeQuery();
+        try (PreparedStatement testAccessSql = conn.prepareStatement(sql);
+                ResultSet resultSet = testAccessSql.executeQuery()) {
+            resultSet.next();
         } catch (Exception e) {
             if (e.getMessage().contains("Permission denied")) {
                 throw new RuntimeException("Permission Denied: " + e.getMessage());

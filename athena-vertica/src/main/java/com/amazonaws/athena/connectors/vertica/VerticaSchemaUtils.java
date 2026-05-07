@@ -63,11 +63,12 @@ public class VerticaSchemaUtils
             SchemaBuilder tableSchemaBuilder = SchemaBuilder.newBuilder();
 
             DatabaseMetaData dbMetadata = connection.getMetaData();
-            ResultSet definition = dbMetadata.getColumns(null, name.getSchemaName(), name.getTableName(), null);
-            while(definition.next())
-            {
-                String colType = definition.getString("TYPE_NAME").toUpperCase();
-                convertToArrowType(tableSchemaBuilder, definition.getString("COLUMN_NAME"), colType);
+            try (ResultSet definition = dbMetadata.getColumns(null, name.getSchemaName(), name.getTableName(), null)) {
+                while(definition.next())
+                {
+                    String colType = definition.getString("TYPE_NAME").toUpperCase();
+                    convertToArrowType(tableSchemaBuilder, definition.getString("COLUMN_NAME"), colType);
+                }
             }
             return tableSchemaBuilder.build();
 
