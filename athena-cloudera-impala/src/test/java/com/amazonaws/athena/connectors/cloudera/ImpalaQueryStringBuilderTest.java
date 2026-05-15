@@ -42,8 +42,8 @@ public class ImpalaQueryStringBuilderTest
 	@Test
 	public void testQueryBuilder()
 	{
-	    String expectedFrom1 = " FROM default.schema.table ";
-	    String expectedFrom2 = " FROM default.table ";
+	    String expectedFrom1 = " FROM `default`.`schema`.`table` ";
+	    String expectedFrom2 = " FROM `default`.`table` ";
 		ImpalaQueryStringBuilder builder = new ImpalaQueryStringBuilder(IMPALA_QUOTE_CHARACTER, new ImpalaFederationExpressionParser(IMPALA_QUOTE_CHARACTER));
 		String fromResult1 = builder.getFromClauseWithSplit("default", "schema", "table", split);
 		String fromResult2 = builder.getFromClauseWithSplit("default", "", "table", split);
