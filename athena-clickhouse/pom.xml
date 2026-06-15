@@ -63,6 +63,7 @@
                         <artifactId>maven-shade-plugin.log4j2-cachefile-transformer</artifactId>
                         <version>${log4j2.cachefile.transformer.version}</version>
                     </dependency>
+
                 </dependencies>
                 <executions>
                     <execution>
