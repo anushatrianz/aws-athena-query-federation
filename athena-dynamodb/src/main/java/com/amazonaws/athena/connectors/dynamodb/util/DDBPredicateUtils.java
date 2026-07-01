@@ -138,7 +138,12 @@ public class DDBPredicateUtils
      *
      * @see <a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ExpressionAttributeNames.html">
      *     https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ExpressionAttributeNames.html</a>
-     */
+    
+     * @param columnName the input column name
+     * @param columnAliasMap map used to store and reuse generated column aliases,
+     *                       ensuring alias uniqueness within a query
+     * @return the aliased column name
+      */
     public static String aliasColumn(String columnName, Map<String, String> columnAliasMap)
     {
         for (Map.Entry<String, String> entry : columnAliasMap.entrySet()) {
