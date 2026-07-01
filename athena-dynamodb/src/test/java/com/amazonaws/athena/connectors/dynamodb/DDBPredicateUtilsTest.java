@@ -49,6 +49,7 @@ import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -101,6 +102,30 @@ public class DDBPredicateUtilsTest
         assertEquals("my-column", columnAliasMap.get("#my_column"));
         assertEquals("my/column", columnAliasMap.get("#my_column_1"));
         assertEquals("#my_column", DDBPredicateUtils.aliasColumn("my-column", columnAliasMap));
+        // re-lookup both columns
+        assertEquals("#my_column", DDBPredicateUtils.aliasColumn("my-column", columnAliasMap));
+        assertEquals("#my_column_1", DDBPredicateUtils.aliasColumn("my/column", columnAliasMap));
+        // third collision
+        assertEquals("#my_column_2", DDBPredicateUtils.aliasColumn("my_column", columnAliasMap));
+    }
+    
+    @Test
+    public void generateFilterExpression_withCollidingColumnNames_usesUniqueAliases()
+    {
+        Map<String, String> columnAliasMap = new HashMap<>();
+        ValueSet valueSet = SortedRangeSet.of(Range.equal(new BlockAllocatorImpl(), VARCHAR.getType(), "x"));
+        String result = DDBPredicateUtils.generateFilterExpression(
+                Collections.emptySet(),
+                ImmutableMap.of("my-column", valueSet, "my/column", valueSet),
+                new ArrayList<>(),
+                new IncrementingValueNameProducer(),
+                new DDBRecordMetadata(null),
+                columnAliasMap);
+        assertNotNull(result);
+        assertTrue(result.contains("#my_column"));
+        assertTrue(result.contains("#my_column_1"));
+        assertEquals("my-column", columnAliasMap.get("#my_column"));
+        assertEquals("my/column", columnAliasMap.get("#my_column_1"));
     }
 
     @Test
