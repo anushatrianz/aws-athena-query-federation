@@ -26,13 +26,14 @@ import org.mockito.Mockito;
 import org.testng.Assert;
 
 import java.util.Arrays;
+import java.util.Collections;
 
 public class Db2As400QueryStringBuilderTest {
     @Mock
     Split split;
 
     @Test
-    public void testQueryBuilder()
+    public void getFromClauseWithSplit_withCatalogAndSchema_returnsFromClause()
     {
         Split split = Mockito.mock(Split.class);
         Db2As400QueryStringBuilder builder = new Db2As400QueryStringBuilder("'");
@@ -41,12 +42,21 @@ public class Db2As400QueryStringBuilderTest {
     }
 
     @Test
-    public void testGetPartitionWhereClauses()
+    public void getPartitionWhereClauses_withPartitionColumn_returnsPartitionWhereClauses()
     {
         Db2As400QueryStringBuilder builder = new Db2As400QueryStringBuilder("'");
         Split split = Mockito.mock(Split.class);
         Mockito.when(split.getProperty(Mockito.eq("partition_number"))).thenReturn("0");
         Mockito.when(split.getProperty(Mockito.eq("PARTITIONING_COLUMN"))).thenReturn("PC");
         Assert.assertEquals(Arrays.asList(" DATAPARTITIONNUM(PC) = 0"), builder.getPartitionWhereClauses(split));
+    }
+
+    @Test
+    public void getPartitionWhereClauses_withoutPartitionColumn_returnsEmptyList()
+    {
+        Db2As400QueryStringBuilder builder = new Db2As400QueryStringBuilder("'");
+        Split split = Mockito.mock(Split.class);
+        Mockito.when(split.getProperty(Mockito.eq("PARTITIONING_COLUMN"))).thenReturn(null);
+        Assert.assertEquals(Collections.emptyList(), builder.getPartitionWhereClauses(split));
     }
 }
