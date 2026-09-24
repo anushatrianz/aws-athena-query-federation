@@ -315,9 +315,6 @@ public class Db2As400MetadataHandlerTest extends TestBase {
     public void doGetTable_withExistingTable_returnsTableMetadata()
             throws Exception
     {
-        String schemaName = TEST_SCHEMA_UPPER;
-        String tableName = TEST_TABLE_UPPER;
-
         Statement statement = Mockito.mock(Statement.class);
         Mockito.when(this.connection.createStatement()).thenReturn(statement);
         ResultSet schemaResultSet = mockResultSet(new String[] {"SCHEMA_NAME"}, new int[] {Types.VARCHAR}, new Object[][] {{TEST_SCHEMA_UPPER}, {TEST_SCHEMA_LOWER}, {TEST_SCHEMA_MIXED}}, new AtomicInteger(-1));
@@ -347,14 +344,14 @@ public class Db2As400MetadataHandlerTest extends TestBase {
         PARTITION_SCHEMA.getFields().forEach(expectedSchemaBuilder::addField);
         Schema expected = expectedSchemaBuilder.build();
 
-        Mockito.when(connection.getMetaData().getColumns(TEST_CATALOG, schemaName, tableName, null)).thenReturn(resultSet);
+        Mockito.when(connection.getMetaData().getColumns(TEST_CATALOG, TEST_SCHEMA_UPPER, TEST_TABLE_UPPER, null)).thenReturn(resultSet);
         Mockito.when(connection.getCatalog()).thenReturn(TEST_CATALOG);
 
         TableName inputTableName = new TableName(TEST_SCHEMA_UPPER, TEST_TABLE_UPPER);
         GetTableResponse getTableResponse = this.db2As400MetadataHandler.doGetTable(
                 this.blockAllocator, new GetTableRequest(this.federatedIdentity, TEST_QUERY_ID, TEST_CATALOG, inputTableName, Collections.emptyMap()));
         Assert.assertEquals(expected, getTableResponse.getSchema());
-        Assert.assertEquals(new TableName(schemaName, tableName), getTableResponse.getTableName());
+        Assert.assertEquals(new TableName(TEST_SCHEMA_UPPER, TEST_TABLE_UPPER), getTableResponse.getTableName());
         Assert.assertEquals(TEST_CATALOG, getTableResponse.getCatalogName());
     }
 
@@ -362,9 +359,6 @@ public class Db2As400MetadataHandlerTest extends TestBase {
     public void doGetTable_withLowerCaseSchemaAndTable_throwsSQLException()
             throws Exception
     {
-        String schemaName = TEST_SCHEMA_LOWER;
-        String tableName = TEST_TABLE_LOWER;
-
         Statement statement = Mockito.mock(Statement.class);
         Mockito.when(this.connection.createStatement()).thenReturn(statement);
         ResultSet schemaResultSet = mockResultSet(new String[] {"NAME"}, new int[] {Types.VARCHAR}, new Object[][] {{TEST_SCHEMA_UPPER}, {TEST_SCHEMA_LOWER}, {TEST_SCHEMA_MIXED}}, new AtomicInteger(-1));
@@ -375,7 +369,7 @@ public class Db2As400MetadataHandlerTest extends TestBase {
         ResultSet tableResultSet = mockResultSet(new String[] {"NAME"}, new int[] {Types.VARCHAR}, new Object[][] {{TEST_TABLE_UPPER}, {TEST_TABLE_LOWER}, {TEST_TABLE_MIXED}}, new AtomicInteger(-1));
         Mockito.when(tableStmt.executeQuery()).thenReturn(tableResultSet);
 
-        TableName inputTableName = new TableName(schemaName, tableName);
+        TableName inputTableName = new TableName(TEST_SCHEMA_LOWER, TEST_TABLE_LOWER);
         Mockito.when(this.connection.getMetaData().getColumns(nullable(String.class), nullable(String.class), nullable(String.class), nullable(String.class)))
                 .thenThrow(new SQLException());
         this.db2As400MetadataHandler.doGetTable(this.blockAllocator, new GetTableRequest(this.federatedIdentity, TEST_QUERY_ID, TEST_CATALOG, inputTableName, Collections.emptyMap()));
@@ -384,9 +378,6 @@ public class Db2As400MetadataHandlerTest extends TestBase {
     @Test(expected = SQLException.class)
     public void doGetTable_withLowerCaseSchema_throwsSQLException()
             throws Exception {
-        String schemaName = TEST_SCHEMA_LOWER;
-        String tableName = TEST_TABLE_UPPER;
-
         Statement statement = Mockito.mock(Statement.class);
         Mockito.when(this.connection.createStatement()).thenReturn(statement);
         ResultSet schemaResultSet = mockResultSet(new String[]{"NAME"}, new int[]{Types.VARCHAR}, new Object[][]{{TEST_SCHEMA_UPPER}, {TEST_SCHEMA_LOWER}, {TEST_SCHEMA_MIXED}}, new AtomicInteger(-1));
@@ -397,7 +388,7 @@ public class Db2As400MetadataHandlerTest extends TestBase {
         ResultSet tableResultSet = mockResultSet(new String[]{"NAME"}, new int[]{Types.VARCHAR}, new Object[][]{{TEST_TABLE_UPPER}, {TEST_TABLE_LOWER}, {TEST_TABLE_MIXED}}, new AtomicInteger(-1));
         Mockito.when(tablePstmt.executeQuery()).thenReturn(tableResultSet);
 
-        TableName inputTableName = new TableName(schemaName, tableName);
+        TableName inputTableName = new TableName(TEST_SCHEMA_LOWER, TEST_TABLE_UPPER);
         Mockito.when(this.connection.getMetaData().getColumns(nullable(String.class), nullable(String.class), nullable(String.class), nullable(String.class)))
                 .thenThrow(new SQLException());
         this.db2As400MetadataHandler.doGetTable(this.blockAllocator, new GetTableRequest(this.federatedIdentity, TEST_QUERY_ID, TEST_CATALOG, inputTableName, Collections.emptyMap()));
@@ -406,9 +397,6 @@ public class Db2As400MetadataHandlerTest extends TestBase {
     @Test(expected = SQLException.class)
     public void doGetTable_withLowerCaseTable_throwsSQLException()
             throws Exception {
-        String schemaName = TEST_SCHEMA_UPPER;
-        String tableName = TEST_TABLE_LOWER;
-
         Statement statement = Mockito.mock(Statement.class);
         Mockito.when(this.connection.createStatement()).thenReturn(statement);
         ResultSet schemaResultSet = mockResultSet(new String[]{"NAME"}, new int[]{Types.VARCHAR}, new Object[][]{{TEST_SCHEMA_UPPER}, {TEST_SCHEMA_LOWER}, {TEST_SCHEMA_MIXED}}, new AtomicInteger(-1));
@@ -419,7 +407,7 @@ public class Db2As400MetadataHandlerTest extends TestBase {
         ResultSet tableResultSet = mockResultSet(new String[]{"NAME"}, new int[]{Types.VARCHAR}, new Object[][]{{TEST_TABLE_UPPER}, {TEST_TABLE_LOWER}, {TEST_TABLE_MIXED}}, new AtomicInteger(-1));
         Mockito.when(tableStmt.executeQuery()).thenReturn(tableResultSet);
 
-        TableName inputTableName = new TableName(schemaName, tableName);
+        TableName inputTableName = new TableName(TEST_SCHEMA_UPPER, TEST_TABLE_LOWER);
         Mockito.when(this.connection.getMetaData().getColumns(nullable(String.class), nullable(String.class), nullable(String.class), nullable(String.class)))
                 .thenThrow(new SQLException());
         this.db2As400MetadataHandler.doGetTable(this.blockAllocator, new GetTableRequest(this.federatedIdentity, TEST_QUERY_ID, TEST_CATALOG, inputTableName, Collections.emptyMap()));
@@ -428,9 +416,6 @@ public class Db2As400MetadataHandlerTest extends TestBase {
     @Test(expected = SQLException.class)
     public void doGetTable_withMixedCaseTable_throwsSQLException()
             throws Exception {
-        String schemaName = TEST_SCHEMA_UPPER;
-        String tableName = TEST_TABLE_MIXED;
-
         Statement statement = Mockito.mock(Statement.class);
         Mockito.when(this.connection.createStatement()).thenReturn(statement);
         ResultSet schemaResultSet = mockResultSet(new String[]{"NAME"}, new int[]{Types.VARCHAR}, new Object[][]{{TEST_SCHEMA_UPPER}, {TEST_SCHEMA_LOWER}, {TEST_SCHEMA_MIXED}}, new AtomicInteger(-1));
@@ -441,7 +426,7 @@ public class Db2As400MetadataHandlerTest extends TestBase {
         ResultSet tableResultSet = mockResultSet(new String[]{"NAME"}, new int[]{Types.VARCHAR}, new Object[][]{{TEST_TABLE_LOWER}}, new AtomicInteger(-1));
         Mockito.when(tableStmt.executeQuery()).thenReturn(tableResultSet);
 
-        TableName inputTableName = new TableName(schemaName, tableName);
+        TableName inputTableName = new TableName(TEST_SCHEMA_UPPER, TEST_TABLE_MIXED);
         Mockito.when(this.connection.getMetaData().getColumns(nullable(String.class), nullable(String.class), nullable(String.class), nullable(String.class)))
                 .thenThrow(new SQLException());
         this.db2As400MetadataHandler.doGetTable(this.blockAllocator, new GetTableRequest(this.federatedIdentity, TEST_QUERY_ID, TEST_CATALOG, inputTableName, Collections.emptyMap()));
@@ -464,8 +449,7 @@ public class Db2As400MetadataHandlerTest extends TestBase {
 
     @Test
     public void doListTables_whenTablesExist_returnsTables() throws Exception {
-        String schemaName = TEST_SCHEMA_UPPER;
-        ListTablesRequest listTablesRequest = new ListTablesRequest(federatedIdentity, TEST_QUERY_ID, TEST_CATALOG, schemaName, null, 0);
+        ListTablesRequest listTablesRequest = new ListTablesRequest(federatedIdentity, TEST_QUERY_ID, TEST_CATALOG, TEST_SCHEMA_UPPER, null, 0);
 
         PreparedStatement stmt = Mockito.mock(PreparedStatement.class);
         Mockito.when(this.connection.prepareStatement(Db2As400Constants.QRY_TO_LIST_TABLES_AND_VIEWS)).thenReturn(stmt);
