@@ -36,7 +36,6 @@ import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import com.google.common.collect.ImmutableMap;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -54,8 +53,9 @@ import java.util.stream.Collectors;
 import static com.amazonaws.athena.connector.lambda.metadata.optimizations.querypassthrough.QueryPassthroughSignature.ENABLE_QUERY_PASSTHROUGH;
 import static com.amazonaws.athena.connector.lambda.metadata.optimizations.querypassthrough.QueryPassthroughSignature.SCHEMA_FUNCTION_NAME;
 import static com.amazonaws.athena.connectors.jdbc.qpt.JdbcQueryPassthrough.QUERY;
-import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.nullable;
 
 public class HiveMetadataHandlerTest
@@ -137,7 +137,7 @@ public class HiveMetadataHandlerTest
                 CATALOG_NAME,tempTableName, constraints, partitionSchema, partitionCols);
         String value2 = "case_date=01-01-2000/case_number=0/case_instance=89898989/case_location=__HIVE_DEFAULT_PARTITION__";
         String value3 = "case_date=02-01-2000/case_number=1/case_instance=89898990/case_location=Hyderabad";
-        String[] columns2 = {PARTITION_COLUMN_NAME};
+        String[] columns2 = {"Partition"};
         int[] types2 = {Types.VARCHAR};
         Object[][] values1 = {{value2},{value3}};
         String[] columns3 = {"col"};
@@ -174,7 +174,7 @@ public class HiveMetadataHandlerTest
         Set<String> partitionCols = new HashSet<>(Arrays.asList(PARTITION_COLUMN_NAME));
         GetTableLayoutRequest getTableLayoutRequest = new GetTableLayoutRequest(this.federatedIdentity, QUERY_ID,
                 CATALOG_NAME,tempTableName, constraints, partitionSchema, partitionCols);
-        String[] columns2 = {PARTITION_COLUMN_NAME};
+        String[] columns2 = {"Partition"};
         int[] types2 = {Types.VARCHAR};
         ResultSet resultSet1 = mockResultSet(columns2, types2, new Object[][] {}, new AtomicInteger(-1));
         stubPartitionMetadataQueries(TEST_TABLE, resultSet, resultSet1, mockResultSet(new String[] {"col"}, new int[] {Types.VARCHAR}, new Object[][] {}, new AtomicInteger(-1)));
@@ -229,7 +229,7 @@ public class HiveMetadataHandlerTest
                 CATALOG_NAME, tempTableName, constraints, partitionSchema, partitionCols);
         String value2 = "case_date=01-01-2000/case_number=0/case_instance=89898989/case_location=__HIVE_DEFAULT_PARTITION__";
         String value3 = "case_date=02-01-2000/case_number=1/case_instance=89898990/case_location=Hyderabad";
-        String[] columns2 = {PARTITION_COLUMN_NAME};
+        String[] columns2 = {"Partition"};
         int[] types2 = {Types.VARCHAR};
         Object[][] values1 = {{value2}, {value3}};
         ResultSet resultSet1 = mockResultSet(columns2, types2, values1, new AtomicInteger(-1));
