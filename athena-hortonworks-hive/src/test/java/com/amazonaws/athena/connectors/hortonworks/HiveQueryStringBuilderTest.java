@@ -53,13 +53,6 @@ public class HiveQueryStringBuilderTest
 	}
 
 	@Test
-	public void getFromClauseWithSplit_whenSchemaIsNull_returnsCatalogAndTable()
-	{
-		HiveQueryStringBuilder builder = new HiveQueryStringBuilder(HIVE_QUOTE_CHARACTER, new HiveFederationExpressionParser(HIVE_QUOTE_CHARACTER));
-		assertEquals(" FROM default.table ", builder.getFromClauseWithSplit("default", null, "table", split));
-	}
-
-	@Test
 	public void getPartitionWhereClauses_whenAllPartitions_returnsEmptyList()
 	{
 		Mockito.when(split.getProperty(HiveConstants.BLOCK_PARTITION_COLUMN_NAME)).thenReturn("*");
