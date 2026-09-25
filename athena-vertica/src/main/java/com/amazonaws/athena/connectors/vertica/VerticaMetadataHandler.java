@@ -108,6 +108,8 @@ public class VerticaMetadataHandler
     private final JdbcQueryPassthrough queryPassthrough = new JdbcQueryPassthrough();
 
     private static final String SEPARATOR = "/";
+    private static final int CONCURRENT_EXPORT_POLL_ATTEMPTS = 5;
+    private static final long CONCURRENT_EXPORT_POLL_INTERVAL_MS = 250L;
 
     public VerticaMetadataHandler(Map<String, String> configOptions)
     {
@@ -342,12 +344,13 @@ public class VerticaMetadataHandler
         }
         Set<Split> splits = new HashSet<>();
         String exportBucket = getS3ExportBucket();
-        String queryId = request.getQueryId().replace("-","");
         Constraints constraints  = request.getConstraints();
-        String s3ExportBucket = getS3ExportBucket();
         String sqlStatement;
         //testing if the user has access to the requested table
 
+        // Unique export directory built in getPartitions (Athena query id + UUID). Do not use
+        // request.getQueryId() for the S3 prefix: UNION ALL branches share that id, so they would
+        // list each other's exports and concurrent calls would collide on one directory.
         FieldReader fieldReaderQid = request.getPartitions().getFieldReader("queryId");
         String queryID  = fieldReaderQid.readText().toString();
 
@@ -357,7 +360,7 @@ public class VerticaMetadataHandler
             String preparedSQL = buildQueryPassthroughSql(constraints);
 
             VerticaExportQueryBuilder queryBuilder = queryFactory.createQptVerticaExportQueryBuilder();
-            sqlStatement = queryBuilder.withS3ExportBucket(s3ExportBucket)
+            sqlStatement = queryBuilder.withS3ExportBucket(exportBucket)
                     .withQueryID(queryID)
                     .withPreparedStatementSQL(preparedSQL).build();
             logger.info("Vertica Export Statement: {}", sqlStatement);
@@ -380,18 +383,13 @@ public class VerticaMetadataHandler
             s3ExportBucketName = s3ExportBucketPath[0];
             remainingPath = s3ExportBucketPath[1] + SEPARATOR;
         } else {
-            s3ExportBucketName = s3ExportBucket;
+            s3ExportBucketName = exportBucket;
             remainingPath = "";
         }
-        String prefix = remainingPath + queryId;
+        String prefix = remainingPath + queryID;
 
-        List<S3Object> s3ObjectsList = getlistExportedObjects(s3ExportBucketName, prefix);
-        if (s3ObjectsList.isEmpty()) {
-            // Execute queries on Vertica if S3 export bucket does not contain objects for given queryId
-            executeQueriesOnVertica(connection, sqlStatement, awsRegionSql);
-            // Retrieve the S3 objects list for given queryId
-            s3ObjectsList = getlistExportedObjects(s3ExportBucketName, prefix);
-        }
+        List<S3Object> s3ObjectsList = ensureExportedObjects(connection, sqlStatement, awsRegionSql,
+                s3ExportBucketName, prefix);
 
         Split split;
 
@@ -423,6 +421,56 @@ public class VerticaMetadataHandler
             return new GetSplitsResponse(catalogName,split);
         }
 
+    }
+
+    /**
+     * Lists the objects already exported under this prefix and only runs EXPORT TO PARQUET when there are none.
+     * Athena can invoke doGetSplits concurrently (for example UNION ALL on warm Lambdas); those invocations can
+     * all observe an empty prefix and start the same export, which makes Vertica fail writing the same S3 path.
+     * When that happens, re-check the prefix and reuse whatever the winning export produced.
+     */
+    private List<S3Object> ensureExportedObjects(Connection connection, String sqlStatement, String awsRegionSql,
+            String s3ExportBucketName, String prefix)
+    {
+        List<S3Object> s3ObjectsList = getlistExportedObjects(s3ExportBucketName, prefix);
+        if (!s3ObjectsList.isEmpty()) {
+            return s3ObjectsList;
+        }
+        try {
+            executeQueriesOnVertica(connection, sqlStatement, awsRegionSql);
+        }
+        catch (RuntimeException e) {
+            logger.warn("Vertica export failed for prefix {}; checking for objects from a concurrent export", prefix, e);
+            s3ObjectsList = pollExportedObjects(s3ExportBucketName, prefix);
+            if (!s3ObjectsList.isEmpty()) {
+                return s3ObjectsList;
+            }
+            throw e;
+        }
+        return getlistExportedObjects(s3ExportBucketName, prefix);
+    }
+
+    /*
+     * Re-lists the export prefix a few times to give a concurrent export time to publish its objects.
+     */
+    private List<S3Object> pollExportedObjects(String s3ExportBucket, String prefix)
+    {
+        for (int attempt = 0; attempt < CONCURRENT_EXPORT_POLL_ATTEMPTS; attempt++) {
+            List<S3Object> objects = getlistExportedObjects(s3ExportBucket, prefix);
+            if (!objects.isEmpty()) {
+                return objects;
+            }
+            if (attempt < CONCURRENT_EXPORT_POLL_ATTEMPTS - 1) {
+                try {
+                    Thread.sleep(CONCURRENT_EXPORT_POLL_INTERVAL_MS);
+                }
+                catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        return Collections.emptyList();
     }
 
     /*

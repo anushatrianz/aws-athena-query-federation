@@ -58,6 +58,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.slf4j.Logger;
@@ -78,6 +79,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -536,6 +538,92 @@ public class VerticaMetadataHandlerTest extends TestBase
         assertEquals("query123/part1.parquet", split.getProperty("s3ObjectKey"));
     }
 
+
+    @Test
+    public void doGetSplits_whenExportAlreadyWritten_skipsExportAndUsesUniquePrefix() throws Exception
+    {
+        String uniqueExportQueryId = "athenaqid" + UUID.randomUUID().toString().replace("-", "");
+        Block partitions = buildExportPartitions(uniqueExportQueryId, "EXPORT TO PARQUET dummy");
+
+        S3Object obj = S3Object.builder().key(uniqueExportQueryId + "/part.parquet").build();
+        Mockito.when(amazonS3.listObjects(nullable(ListObjectsRequest.class)))
+                .thenReturn(ListObjectsResponse.builder().contents(Collections.singletonList(obj)).build());
+        Mockito.when(verticaMetadataHandlerMocked.getS3ExportBucket()).thenReturn(TEST_S3_BUCKET);
+
+        GetSplitsResponse response = verticaMetadataHandlerMocked.doGetSplits(allocator, buildExportSplitsRequest(partitions));
+
+        assertEquals(1, response.getSplits().size());
+        // Export is skipped entirely when the unique prefix already holds objects.
+        Mockito.verify(connection, Mockito.never()).prepareStatement("EXPORT TO PARQUET dummy");
+
+        ArgumentCaptor<ListObjectsRequest> listCaptor = ArgumentCaptor.forClass(ListObjectsRequest.class);
+        Mockito.verify(amazonS3, Mockito.atLeastOnce()).listObjects(listCaptor.capture());
+        assertTrue(listCaptor.getAllValues().stream().allMatch(req -> uniqueExportQueryId.equals(req.prefix())));
+    }
+
+    @Test
+    public void doGetSplits_whenConcurrentExportFails_reusesObjectsWrittenByWinningExport() throws Exception
+    {
+        String uniqueExportQueryId = "athenaqid" + UUID.randomUUID().toString().replace("-", "");
+        Block partitions = buildExportPartitions(uniqueExportQueryId, "EXPORT TO PARQUET dummy");
+
+        ListObjectsResponse empty = ListObjectsResponse.builder().contents(Collections.emptyList()).build();
+        S3Object obj = S3Object.builder().key(uniqueExportQueryId + "/part.parquet").build();
+        ListObjectsResponse exported = ListObjectsResponse.builder().contents(Collections.singletonList(obj)).build();
+        Mockito.when(amazonS3.listObjects(nullable(ListObjectsRequest.class))).thenReturn(empty, exported);
+
+        Mockito.when(connection.prepareStatement("ALTER SESSION SET AWSRegion='us-west-2'"))
+                .thenReturn(Mockito.mock(PreparedStatement.class));
+        // Simulates the S3 write conflict raised when a concurrent invocation exports the same path.
+        Mockito.when(connection.prepareStatement("EXPORT TO PARQUET dummy"))
+                .thenThrow(new SQLException("S3 write permission error"));
+        Mockito.when(verticaMetadataHandlerMocked.getS3ExportBucket()).thenReturn(TEST_S3_BUCKET);
+
+        GetSplitsResponse response = verticaMetadataHandlerMocked.doGetSplits(allocator, buildExportSplitsRequest(partitions));
+
+        assertEquals(1, response.getSplits().size());
+        assertEquals(uniqueExportQueryId + "/part.parquet",
+                response.getSplits().iterator().next().getProperty("s3ObjectKey"));
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void doGetSplits_whenExportFailsAndNothingExported_propagatesException() throws Exception
+    {
+        String uniqueExportQueryId = "athenaqid" + UUID.randomUUID().toString().replace("-", "");
+        Block partitions = buildExportPartitions(uniqueExportQueryId, "EXPORT TO PARQUET dummy");
+
+        Mockito.when(amazonS3.listObjects(nullable(ListObjectsRequest.class)))
+                .thenReturn(ListObjectsResponse.builder().contents(Collections.emptyList()).build());
+        Mockito.when(connection.prepareStatement("ALTER SESSION SET AWSRegion='us-west-2'"))
+                .thenReturn(Mockito.mock(PreparedStatement.class));
+        Mockito.when(connection.prepareStatement("EXPORT TO PARQUET dummy"))
+                .thenThrow(new SQLException("S3 write permission error"));
+        Mockito.when(verticaMetadataHandlerMocked.getS3ExportBucket()).thenReturn(TEST_S3_BUCKET);
+
+        verticaMetadataHandlerMocked.doGetSplits(allocator, buildExportSplitsRequest(partitions));
+    }
+
+    private Block buildExportPartitions(String exportQueryId, String preparedStmt)
+    {
+        Schema schema = SchemaBuilder.newBuilder()
+                .addStringField(PREPARED_STMT_FIELD)
+                .addStringField(TEST_QUERY_ID)
+                .addStringField(AWS_REGION_SQL_FIELD)
+                .build();
+        Block partitions = allocator.createBlock(schema);
+        BlockUtils.setValue(partitions.getFieldVector(PREPARED_STMT_FIELD), 0, preparedStmt);
+        BlockUtils.setValue(partitions.getFieldVector(TEST_QUERY_ID), 0, exportQueryId);
+        BlockUtils.setValue(partitions.getFieldVector(AWS_REGION_SQL_FIELD), 0, "ALTER SESSION SET AWSRegion='us-west-2'");
+        return partitions;
+    }
+
+    private GetSplitsRequest buildExportSplitsRequest(Block partitions)
+    {
+        return new GetSplitsRequest(federatedIdentity, TEST_QUERY_ID, "catalog_name",
+                new TableName("schema", "table_name"), partitions, Collections.emptyList(),
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(),
+                        DEFAULT_NO_LIMIT, Collections.emptyMap(), null), null);
+    }
 
     @Test
     public void testBuildQueryPassthroughSql() {
