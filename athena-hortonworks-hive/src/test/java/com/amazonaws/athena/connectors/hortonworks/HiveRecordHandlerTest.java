@@ -25,7 +25,6 @@ import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -35,7 +34,6 @@ import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import com.amazonaws.athena.connectors.jdbc.manager.JdbcSplitQueryBuilder;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -62,7 +60,7 @@ import static com.amazonaws.athena.connectors.hortonworks.HiveConstants.HIVE_QUO
 import static com.amazonaws.athena.connectors.jdbc.qpt.JdbcQueryPassthrough.NAME;
 import static com.amazonaws.athena.connectors.jdbc.qpt.JdbcQueryPassthrough.QUERY;
 import static com.amazonaws.athena.connectors.jdbc.qpt.JdbcQueryPassthrough.SCHEMA_NAME;
-import static org.mockito.ArgumentMatchers.any;
+import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.nullable;
 
 public class HiveRecordHandlerTest
@@ -144,9 +142,9 @@ public class HiveRecordHandlerTest
         PreparedStatement expectedPreparedStatement = Mockito.mock(PreparedStatement.class);
         Mockito.when(this.connection.prepareStatement(nullable(String.class))).thenReturn(expectedPreparedStatement);
         PreparedStatement preparedStatement = this.hiveRecordHandler.buildSplitSql(this.connection, CATALOG_NAME, tableName, schema, constraints, split);
-        Assert.assertEquals(expectedPreparedStatement, preparedStatement);
+        assertEquals(expectedPreparedStatement, preparedStatement);
         Date expectedDate = new Date(120, 0, 5);
-        Assert.assertEquals(expectedPreparedStatement, preparedStatement);
+        assertEquals(expectedPreparedStatement, preparedStatement);
         Mockito.verify(preparedStatement, Mockito.times(1))
                 .setDate(1, expectedDate);
     }
@@ -182,6 +180,6 @@ public class HiveRecordHandlerTest
 
         Mockito.verify(this.connection).prepareStatement(passthroughQuery);
         Mockito.verify(expectedPreparedStatement).setFetchSize(HiveConstants.FETCH_SIZE);
-        Assert.assertEquals(expectedPreparedStatement, preparedStatement);
+        assertEquals(expectedPreparedStatement, preparedStatement);
     }
 }

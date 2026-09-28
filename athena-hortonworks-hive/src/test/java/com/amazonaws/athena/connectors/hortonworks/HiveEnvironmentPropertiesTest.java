@@ -52,25 +52,25 @@ public class HiveEnvironmentPropertiesTest {
     }
     
     @Test
-    public void connectionPropertiesToEnvironment_WithSecret_ReturnsCorrectConnectionString() {
+    public void connectionPropertiesToEnvironment_withSecret_returnsCorrectConnectionString() {
         connectionProperties.put(SECRET_NAME, TEST_SECRET);
         Map<String, String> result = environmentProperties.connectionPropertiesToEnvironment(connectionProperties);
         assertEquals(CONNECTION_STRING_PREFIX + "?${" + TEST_SECRET + "}", result.get(DEFAULT));
     }
     
     @Test
-    public void connectionPropertiesToEnvironment_WithoutSecret_ReturnsCorrectConnectionString() {
+    public void connectionPropertiesToEnvironment_withoutSecret_returnsCorrectConnectionString() {
         Map<String, String> result = environmentProperties.connectionPropertiesToEnvironment(connectionProperties);
         assertEquals(CONNECTION_STRING_PREFIX + "?", result.get(DEFAULT));
     }
     
     @Test(expected = NullPointerException.class)
-    public void connectionPropertiesToEnvironment_WithNullProperties_ThrowsNullPointerException() {
+    public void connectionPropertiesToEnvironment_withNullProperties_throwsNullPointerException() {
         environmentProperties.connectionPropertiesToEnvironment(null);
     }
     
     @Test
-    public void connectionPropertiesToEnvironment_WithMissingHost_ReturnsNullHostInConnectionString() {
+    public void connectionPropertiesToEnvironment_withMissingHost_returnsNullHostInConnectionString() {
         connectionProperties.remove(HOST);
         Map<String, String> result = environmentProperties.connectionPropertiesToEnvironment(connectionProperties);
         assertEquals("hive://jdbc:hive2://null:" + TEST_PORT + "/" + TEST_DATABASE + "?", result.get(DEFAULT));

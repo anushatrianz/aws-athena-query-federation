@@ -63,14 +63,13 @@ public class HiveMetadataHandlerTest
 {
     private static final String CATALOG_NAME = "testCatalog";
     private static final String QUERY_ID = "queryId";
-    private static final String BASE_CONNECTION_STRING = "jdbc:hive2://testHost:10000/athena;";
     private static final String SECRET_NAME = "testSecret";
     private static final String TEST_SCHEMA = "testSchema";
     private static final String TEST_TABLE = "testTable";
     private static final String PARTITION_COLUMN_NAME = "partition";
 
     private DatabaseConnectionConfig databaseConnectionConfig = new DatabaseConnectionConfig(CATALOG_NAME, HiveConstants.HIVE_NAME,
-            BASE_CONNECTION_STRING + "${" + SECRET_NAME + "}", SECRET_NAME);
+            "jdbc:hive2://testHost:10000/athena;${" + SECRET_NAME + "}", SECRET_NAME);
     private HiveMetadataHandler hiveMetadataHandler;
     private JdbcConnectionFactory jdbcConnectionFactory;
     private Connection connection;
@@ -103,13 +102,13 @@ public class HiveMetadataHandlerTest
     private void stubPartitionMetadataQueries(String tableName, ResultSet describeResult, ResultSet partitionResult, ResultSet extendedResult)
             throws SQLException
     {
-        PreparedStatement preparestatement1 = Mockito.mock(PreparedStatement.class);
-        Statement statement1 = Mockito.mock(Statement.class);
-        Mockito.when(this.connection.prepareStatement(HiveMetadataHandler.GET_METADATA_QUERY + tableName.toUpperCase())).thenReturn(preparestatement1);
-        Mockito.when(this.connection.createStatement()).thenReturn(statement1);
-        Mockito.when(preparestatement1.executeQuery()).thenReturn(describeResult);
-        Mockito.when(statement1.executeQuery("show partitions " + tableName.toUpperCase())).thenReturn(partitionResult);
-        Mockito.when(statement1.executeQuery("show table extended like " + tableName.toUpperCase())).thenReturn(extendedResult);
+        PreparedStatement preparestatement = Mockito.mock(PreparedStatement.class);
+        Statement statement = Mockito.mock(Statement.class);
+        Mockito.when(this.connection.prepareStatement(HiveMetadataHandler.GET_METADATA_QUERY + tableName.toUpperCase())).thenReturn(preparestatement);
+        Mockito.when(this.connection.createStatement()).thenReturn(statement);
+        Mockito.when(preparestatement.executeQuery()).thenReturn(describeResult);
+        Mockito.when(statement.executeQuery("show partitions " + tableName.toUpperCase())).thenReturn(partitionResult);
+        Mockito.when(statement.executeQuery("show table extended like " + tableName.toUpperCase())).thenReturn(extendedResult);
     }
 
     @Test
@@ -286,9 +285,9 @@ public class HiveMetadataHandlerTest
                 {Types.DOUBLE, 91, "case_double", 0, 0},{Types.FLOAT, 91, "case_float", 0, 0}, {Types.BOOLEAN, 1, "case_boolean", 0, 0}};
         ResultSet resultSet1 = mockResultSet(schema1, values1, new AtomicInteger(-1));
         TableName inputTableName = new TableName("TESTSCHEMA", "TESTTABLE");
-        PreparedStatement preparestatement1 = Mockito.mock(PreparedStatement.class);
-        Mockito.when(this.connection.prepareStatement(HiveMetadataHandler.GET_METADATA_QUERY + inputTableName.getTableName().toUpperCase())).thenReturn(preparestatement1);
-        Mockito.when(preparestatement1.executeQuery()).thenReturn(resultSet);
+        PreparedStatement preparestatement = Mockito.mock(PreparedStatement.class);
+        Mockito.when(this.connection.prepareStatement(HiveMetadataHandler.GET_METADATA_QUERY + inputTableName.getTableName().toUpperCase())).thenReturn(preparestatement);
+        Mockito.when(preparestatement.executeQuery()).thenReturn(resultSet);
         Mockito.when(this.connection.getMetaData().getSearchStringEscape()).thenReturn(null);
         Mockito.when(this.connection.getMetaData().getColumns(CATALOG_NAME, inputTableName.getSchemaName(), inputTableName.getTableName(), null)).thenReturn(resultSet1);
         Mockito.when(this.connection.getCatalog()).thenReturn(CATALOG_NAME);

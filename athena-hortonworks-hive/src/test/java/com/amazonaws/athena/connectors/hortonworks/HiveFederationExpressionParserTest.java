@@ -32,30 +32,30 @@ public class HiveFederationExpressionParserTest {
     private final HiveFederationExpressionParser parser = new HiveFederationExpressionParser(HIVE_QUOTE_CHARACTER);
     
     @Test
-    public void writeArrayConstructorClause_WithMultipleElements_ReturnsCommaSeparatedString() {
+    public void writeArrayConstructorClause_withMultipleElements_returnsCommaSeparatedString() {
         String result = parser.writeArrayConstructorClause(new ArrowType.Int(32, true), Arrays.asList("1", "2", "3"));
         assertEquals("1, 2, 3", result);
     }
     
     @Test
-    public void writeArrayConstructorClause_WithSingleElement_ReturnsSingleElement() {
+    public void writeArrayConstructorClause_withSingleElement_returnsSingleElement() {
         String result = parser.writeArrayConstructorClause(new ArrowType.Utf8(), Collections.singletonList("'test'"));
         assertEquals("'test'", result);
     }
     
     @Test
-    public void writeArrayConstructorClause_WithEmptyList_ReturnsEmptyString() {
+    public void writeArrayConstructorClause_withEmptyList_returnsEmptyString() {
         String result = parser.writeArrayConstructorClause(new ArrowType.Bool(), Collections.emptyList());
         assertEquals("", result);
     }
     
     @Test(expected = NullPointerException.class)
-    public void writeArrayConstructorClause_WithNullArguments_ThrowsNullPointerException() {
+    public void writeArrayConstructorClause_withNullArguments_throwsNullPointerException() {
         parser.writeArrayConstructorClause(new ArrowType.Int(32, true), null);
     }
     
     @Test(expected = NullPointerException.class)
-    public void writeArrayConstructorClause_WithNullElement_ThrowsNullPointerException() {
+    public void writeArrayConstructorClause_withNullElement_throwsNullPointerException() {
         parser.writeArrayConstructorClause(new ArrowType.Utf8(), Arrays.asList("1", null));
     }
 }
