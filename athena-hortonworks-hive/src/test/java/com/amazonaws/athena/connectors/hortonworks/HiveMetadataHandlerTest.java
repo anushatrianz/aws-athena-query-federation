@@ -69,7 +69,7 @@ public class HiveMetadataHandlerTest
     private static final String PARTITION_COLUMN_NAME = "partition";
 
     private DatabaseConnectionConfig databaseConnectionConfig = new DatabaseConnectionConfig(CATALOG_NAME, HiveConstants.HIVE_NAME,
-            "jdbc:hive2://testHost:10000/athena;${" + SECRET_NAME + "}", SECRET_NAME);
+            "jdbc:hive2://3.236.108.56:21050/athena;${" + SECRET_NAME + "}", SECRET_NAME);
     private HiveMetadataHandler hiveMetadataHandler;
     private JdbcConnectionFactory jdbcConnectionFactory;
     private Connection connection;

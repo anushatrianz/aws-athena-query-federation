@@ -20,7 +20,6 @@
 package com.amazonaws.athena.connectors.hortonworks;
 
 import com.amazonaws.athena.connector.lambda.domain.Split;
-
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
