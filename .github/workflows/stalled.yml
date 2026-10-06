@@ -18,3 +18,5 @@ jobs:
         stale-pr-message: 'This PR is stalled because it has been open for 30 days with no activity.'
         days-before-stale: 30
         repo-token: ${{ secrets.GITHUB_TOKEN }}
+        dry-run: true
+        loglevel: DEBUG
