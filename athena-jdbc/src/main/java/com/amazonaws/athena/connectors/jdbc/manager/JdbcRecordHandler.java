@@ -88,9 +88,11 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 
 /**
  * Abstracts JDBC record handler and provides common reusable split records handling.
@@ -103,6 +105,13 @@ public abstract class JdbcRecordHandler
     private final JdbcConnectionFactory jdbcConnectionFactory;
     private final DatabaseConnectionConfig databaseConnectionConfig;
     private static final String CLICKHOUSE_DB = "clickhouse";
+    /**
+     * Lambda environment variable. When {@code true}, a row that cannot be converted is logged with the
+     * column name, a truncated string form of that cell, and the primary-key values. Off by default so
+     * row data is not written to logs or added to the exception Athena returns. See GitHub issue 364.
+     */
+    static final String ENABLE_PROBLEM_ROW_LOGGING = "enable_problem_row_logging";
+    private static final int MAX_LOGGED_VALUE_LENGTH = 256;
 
     protected final JdbcQueryPassthrough queryPassthrough = new JdbcQueryPassthrough();
 
@@ -170,15 +179,14 @@ public abstract class JdbcRecordHandler
                     ResultSet resultSet = preparedStatement.executeQuery()) {
                 Map<String, String> partitionValues = readRecordsRequest.getSplit().getProperties();
                 Map<String, String> colNameRemapping = getColumnNameRemapping(readRecordsRequest);
+                boolean logProblemRows = isProblemRowLoggingEnabled();
+                List<String> primaryKeyColumns = logProblemRows
+                        ? lookupPrimaryKeyColumns(connection, readRecordsRequest.getTableName())
+                        : Collections.emptyList();
 
                 GeneratedRowWriter.RowWriterBuilder rowWriterBuilder = GeneratedRowWriter.newBuilder(readRecordsRequest.getConstraints());
                 for (Field next : readRecordsRequest.getSchema().getFields()) {
-                    if (next.getType() instanceof ArrowType.List) {
-                        rowWriterBuilder.withFieldWriterFactory(next.getName(), makeFactory(next));
-                    }
-                    else {
-                        rowWriterBuilder.withExtractor(next.getName(), makeExtractor(next, resultSet, partitionValues, colNameRemapping));
-                    }
+                    registerRowField(rowWriterBuilder, next, resultSet, partitionValues, colNameRemapping, logProblemRows, primaryKeyColumns);
                 }
 
                 GeneratedRowWriter rowWriter = rowWriterBuilder.build();
@@ -228,6 +236,190 @@ public abstract class JdbcRecordHandler
     protected boolean disableCaseSensitivelyLookUpSession(Connection connection)
     {
         return false;
+    }
+
+    /**
+     * Registers one schema field on the row writer. When problem-row logging is enabled, conversion
+     * failures are logged and then rethrown unchanged.
+     */
+    protected void registerRowField(
+            GeneratedRowWriter.RowWriterBuilder rowWriterBuilder,
+            Field field,
+            ResultSet resultSet,
+            Map<String, String> partitionValues,
+            Map<String, String> colNameRemapping,
+            boolean logProblemRows,
+            List<String> primaryKeyColumns)
+    {
+        String fieldName = colNameRemapping.getOrDefault(field.getName(), field.getName());
+        if (field.getType() instanceof ArrowType.List) {
+            FieldWriterFactory factory = makeFactory(field);
+            if (logProblemRows) {
+                factory = wrapListFactory(factory, fieldName, resultSet, primaryKeyColumns);
+            }
+            rowWriterBuilder.withFieldWriterFactory(field.getName(), factory);
+            return;
+        }
+
+        Extractor extractor = makeExtractor(field, resultSet, partitionValues, colNameRemapping);
+        if (logProblemRows && !partitionValues.containsKey(fieldName)) {
+            extractor = decorateForProblemRowLogging(
+                    extractor, Types.getMinorTypeForArrowType(field.getType()), fieldName, resultSet, primaryKeyColumns);
+        }
+        rowWriterBuilder.withExtractor(field.getName(), extractor);
+    }
+
+    protected boolean isProblemRowLoggingEnabled()
+    {
+        if (configOptions == null) {
+            return false;
+        }
+        return Boolean.parseBoolean(configOptions.getOrDefault(ENABLE_PROBLEM_ROW_LOGGING, "false"));
+    }
+
+    /**
+     * Reads primary-key column names for diagnostics. Failures here are logged without row data and do not fail the query.
+     */
+    protected List<String> lookupPrimaryKeyColumns(Connection connection, TableName tableName)
+    {
+        Map<Short, String> ordered = new TreeMap<>();
+        try (ResultSet keys = connection.getMetaData().getPrimaryKeys(null, tableName.getSchemaName(), tableName.getTableName())) {
+            while (keys != null && keys.next()) {
+                ordered.put(keys.getShort("KEY_SEQ"), keys.getString("COLUMN_NAME"));
+            }
+        }
+        catch (SQLException e) {
+            LOGGER.warn("enable_problem_row_logging is set but primary key metadata could not be read for {}.{}: {}",
+                    tableName.getSchemaName(), tableName.getTableName(), e.getMessage());
+        }
+        return new ArrayList<>(ordered.values());
+    }
+
+    private FieldWriterFactory wrapListFactory(FieldWriterFactory factory, String fieldName, ResultSet resultSet, List<String> primaryKeyColumns)
+    {
+        return (vector, extractor, constraint) -> {
+            FieldWriter delegate = factory.create(vector, extractor, constraint);
+            return (context, rowNum) -> {
+                try {
+                    return delegate.write(context, rowNum);
+                }
+                catch (Exception e) {
+                    logProblemRow(fieldName, resultSet, primaryKeyColumns, e);
+                    throw e;
+                }
+            };
+        };
+    }
+
+    private Extractor decorateForProblemRowLogging(
+            Extractor extractor,
+            Types.MinorType fieldType,
+            String fieldName,
+            ResultSet resultSet,
+            List<String> primaryKeyColumns)
+    {
+        switch (fieldType) {
+            case BIT:
+                BitExtractor bitExtractor = (BitExtractor) extractor;
+                return (BitExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> bitExtractor.extract(context, dst));
+            case TINYINT:
+                TinyIntExtractor tinyIntExtractor = (TinyIntExtractor) extractor;
+                return (TinyIntExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> tinyIntExtractor.extract(context, dst));
+            case SMALLINT:
+                SmallIntExtractor smallIntExtractor = (SmallIntExtractor) extractor;
+                return (SmallIntExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> smallIntExtractor.extract(context, dst));
+            case INT:
+                IntExtractor intExtractor = (IntExtractor) extractor;
+                return (IntExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> intExtractor.extract(context, dst));
+            case BIGINT:
+                BigIntExtractor bigIntExtractor = (BigIntExtractor) extractor;
+                return (BigIntExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> bigIntExtractor.extract(context, dst));
+            case FLOAT4:
+                Float4Extractor float4Extractor = (Float4Extractor) extractor;
+                return (Float4Extractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> float4Extractor.extract(context, dst));
+            case FLOAT8:
+                Float8Extractor float8Extractor = (Float8Extractor) extractor;
+                return (Float8Extractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> float8Extractor.extract(context, dst));
+            case DECIMAL:
+                DecimalExtractor decimalExtractor = (DecimalExtractor) extractor;
+                return (DecimalExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> decimalExtractor.extract(context, dst));
+            case DATEDAY:
+                DateDayExtractor dateDayExtractor = (DateDayExtractor) extractor;
+                return (DateDayExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> dateDayExtractor.extract(context, dst));
+            case DATEMILLI:
+                DateMilliExtractor dateMilliExtractor = (DateMilliExtractor) extractor;
+                return (DateMilliExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> dateMilliExtractor.extract(context, dst));
+            case VARCHAR:
+                VarCharExtractor varCharExtractor = (VarCharExtractor) extractor;
+                return (VarCharExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> varCharExtractor.extract(context, dst));
+            case VARBINARY:
+                VarBinaryExtractor varBinaryExtractor = (VarBinaryExtractor) extractor;
+                return (VarBinaryExtractor) (context, dst) -> runGuarded(fieldName, resultSet, primaryKeyColumns, () -> varBinaryExtractor.extract(context, dst));
+            default:
+                return extractor;
+        }
+    }
+
+    private void runGuarded(String fieldName, ResultSet resultSet, List<String> primaryKeyColumns, CheckedRunnable action)
+            throws Exception
+    {
+        try {
+            action.run();
+        }
+        catch (Exception e) {
+            logProblemRow(fieldName, resultSet, primaryKeyColumns, e);
+            throw e;
+        }
+    }
+
+    private void logProblemRow(String columnName, ResultSet resultSet, List<String> primaryKeyColumns, Exception error)
+    {
+        reportProblemRow(columnName, readCellAsString(resultSet, columnName), formatPrimaryKey(resultSet, primaryKeyColumns), error);
+    }
+
+    /**
+     * Logs the failing cell. The original exception is not modified, so the value is not returned to Athena.
+     */
+    @VisibleForTesting
+    protected void reportProblemRow(String columnName, String stringValue, String primaryKey, Exception error)
+    {
+        LOGGER.warn("Incompatible database row. column={} value={} primaryKey={} error={}",
+                columnName, stringValue, primaryKey, error.toString());
+    }
+
+    private String readCellAsString(ResultSet resultSet, String columnName)
+    {
+        try {
+            String value = resultSet.getString(columnName);
+            if (value == null) {
+                return "null";
+            }
+            if (value.length() > MAX_LOGGED_VALUE_LENGTH) {
+                return value.substring(0, MAX_LOGGED_VALUE_LENGTH) + "...";
+            }
+            return value;
+        }
+        catch (SQLException e) {
+            return "<unreadable>";
+        }
+    }
+
+    private String formatPrimaryKey(ResultSet resultSet, List<String> primaryKeyColumns)
+    {
+        if (primaryKeyColumns == null || primaryKeyColumns.isEmpty()) {
+            return "unavailable";
+        }
+        List<String> parts = new ArrayList<>();
+        for (String column : primaryKeyColumns) {
+            parts.add(column + "=" + readCellAsString(resultSet, column));
+        }
+        return String.join(", ", parts);
+    }
+
+    @FunctionalInterface
+    private interface CheckedRunnable
+    {
+        void run() throws Exception;
     }
 
     /**
