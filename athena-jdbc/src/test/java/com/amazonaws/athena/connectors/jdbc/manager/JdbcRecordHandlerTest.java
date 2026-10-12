@@ -605,6 +605,7 @@ public class JdbcRecordHandlerTest
         Assert.assertFalse(thrown.getMessage().contains("2018-00-15 04:59:59"));
         Assert.assertEquals(Collections.singletonList("created_at|2018-00-15 04:59:59|id=2"), reported);
         Mockito.verify(resultSet, Mockito.times(1)).getTimestamp("created_at");
+        Mockito.verify(metaData, Mockito.times(1)).getPrimaryKeys(null, TEST_SCHEMA, TEST_TABLE);
     }
 
     @Test

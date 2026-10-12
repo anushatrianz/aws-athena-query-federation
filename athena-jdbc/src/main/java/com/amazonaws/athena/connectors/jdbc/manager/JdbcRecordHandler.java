@@ -174,15 +174,17 @@ public abstract class JdbcRecordHandler
 
             enableCaseSensitivelyLookUpSession(connection); // For certain connectors, we require to apply session config first to enable case
 
+            // MySQL streaming (fetchSize = Integer.MIN_VALUE) rejects another statement while the query ResultSet is open.
+            boolean logProblemRows = isProblemRowLoggingEnabled();
+            List<String> primaryKeyColumns = logProblemRows
+                    ? lookupPrimaryKeyColumns(connection, readRecordsRequest.getTableName())
+                    : Collections.emptyList();
+
             try (PreparedStatement preparedStatement = buildSplitSql(connection, readRecordsRequest.getCatalogName(), readRecordsRequest.getTableName(),
                     readRecordsRequest.getSchema(), readRecordsRequest.getConstraints(), readRecordsRequest.getSplit());
                     ResultSet resultSet = preparedStatement.executeQuery()) {
                 Map<String, String> partitionValues = readRecordsRequest.getSplit().getProperties();
                 Map<String, String> colNameRemapping = getColumnNameRemapping(readRecordsRequest);
-                boolean logProblemRows = isProblemRowLoggingEnabled();
-                List<String> primaryKeyColumns = logProblemRows
-                        ? lookupPrimaryKeyColumns(connection, readRecordsRequest.getTableName())
-                        : Collections.emptyList();
 
                 GeneratedRowWriter.RowWriterBuilder rowWriterBuilder = GeneratedRowWriter.newBuilder(readRecordsRequest.getConstraints());
                 for (Field next : readRecordsRequest.getSchema().getFields()) {

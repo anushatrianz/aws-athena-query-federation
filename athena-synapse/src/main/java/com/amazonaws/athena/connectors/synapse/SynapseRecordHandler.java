@@ -119,14 +119,14 @@ public class SynapseRecordHandler extends JdbcRecordHandler
             if (!isAzureServerless) {
                 connection.setAutoCommit(false); // For consistency. This is needed to be false to enable streaming for some database types.
             }
+            boolean logProblemRows = isProblemRowLoggingEnabled();
+            List<String> primaryKeyColumns = logProblemRows
+                    ? lookupPrimaryKeyColumns(connection, readRecordsRequest.getTableName())
+                    : Collections.emptyList();
             try (PreparedStatement preparedStatement = buildSplitSql(connection, readRecordsRequest.getCatalogName(), readRecordsRequest.getTableName(),
                     readRecordsRequest.getSchema(), readRecordsRequest.getConstraints(), readRecordsRequest.getSplit());
                  ResultSet resultSet = preparedStatement.executeQuery()) {
                 Map<String, String> partitionValues = readRecordsRequest.getSplit().getProperties();
-                boolean logProblemRows = isProblemRowLoggingEnabled();
-                List<String> primaryKeyColumns = logProblemRows
-                        ? lookupPrimaryKeyColumns(connection, readRecordsRequest.getTableName())
-                        : Collections.emptyList();
 
                 GeneratedRowWriter.RowWriterBuilder rowWriterBuilder = GeneratedRowWriter.newBuilder(readRecordsRequest.getConstraints());
                 for (Field next : readRecordsRequest.getSchema().getFields()) {
