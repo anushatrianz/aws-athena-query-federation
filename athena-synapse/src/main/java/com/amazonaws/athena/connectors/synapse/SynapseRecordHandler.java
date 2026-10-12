@@ -52,6 +52,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import static com.amazonaws.athena.connectors.synapse.SynapseConstants.QUOTE_CHARACTER;
@@ -117,6 +119,10 @@ public class SynapseRecordHandler extends JdbcRecordHandler
             if (!isAzureServerless) {
                 connection.setAutoCommit(false); // For consistency. This is needed to be false to enable streaming for some database types.
             }
+            boolean logProblemRows = isProblemRowLoggingEnabled();
+            List<String> primaryKeyColumns = logProblemRows
+                    ? lookupPrimaryKeyColumns(connection, readRecordsRequest.getTableName())
+                    : Collections.emptyList();
             try (PreparedStatement preparedStatement = buildSplitSql(connection, readRecordsRequest.getCatalogName(), readRecordsRequest.getTableName(),
                     readRecordsRequest.getSchema(), readRecordsRequest.getConstraints(), readRecordsRequest.getSplit());
                  ResultSet resultSet = preparedStatement.executeQuery()) {
@@ -124,12 +130,7 @@ public class SynapseRecordHandler extends JdbcRecordHandler
 
                 GeneratedRowWriter.RowWriterBuilder rowWriterBuilder = GeneratedRowWriter.newBuilder(readRecordsRequest.getConstraints());
                 for (Field next : readRecordsRequest.getSchema().getFields()) {
-                    if (next.getType() instanceof ArrowType.List) {
-                        rowWriterBuilder.withFieldWriterFactory(next.getName(), makeFactory(next));
-                    }
-                    else {
-                        rowWriterBuilder.withExtractor(next.getName(), makeExtractor(next, resultSet, partitionValues));
-                    }
+                    registerRowField(rowWriterBuilder, next, resultSet, partitionValues, Map.of(), logProblemRows, primaryKeyColumns);
                 }
 
                 GeneratedRowWriter rowWriter = rowWriterBuilder.build();

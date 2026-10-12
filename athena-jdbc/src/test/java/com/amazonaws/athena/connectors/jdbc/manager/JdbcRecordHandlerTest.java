@@ -563,4 +563,141 @@ public class JdbcRecordHandlerTest
         boolean result = jdbcRecordHandler.disableCaseSensitivelyLookUpSession(mockConnection);
         Assert.assertFalse(result); // Default implementation returns false
     }
+
+    @Test
+    public void readWithConstraint_problemRowLoggingDisabled_omitsRowData()
+            throws Exception
+    {
+        ResultSet resultSet = failingTimestampResultSet();
+        Exception thrown = readFailingTimestampRow(this.jdbcRecordHandler, resultSet);
+
+        Assert.assertFalse(thrown.getMessage().contains("created_at"));
+        Assert.assertFalse(thrown.getMessage().contains("2018-00-15 04:59:59"));
+        Mockito.verify(resultSet, Mockito.never()).getString(anyString());
+    }
+
+    @Test
+    public void readWithConstraint_problemRowLoggingEnabled_reportsColumnValueAndPrimaryKey()
+            throws Exception
+    {
+        ResultSet resultSet = failingTimestampResultSet();
+        when(resultSet.getString("created_at")).thenReturn("2018-00-15 04:59:59");
+        when(resultSet.getString("id")).thenReturn("2");
+        stubPrimaryKey("id");
+
+        CapturedProblemRow captured = new CapturedProblemRow();
+        Exception thrown = readFailingTimestampRow(handlerWithProblemRowLogging(captured), resultSet);
+
+        Assert.assertEquals("created_at", captured.columnName);
+        Assert.assertEquals("2018-00-15 04:59:59", captured.value);
+        Assert.assertEquals("id=2", captured.primaryKey);
+        Assert.assertFalse(thrown.getMessage().contains("2018-00-15 04:59:59"));
+    }
+
+    @Test
+    public void readWithConstraint_problemRowLoggingEnabled_truncatesLongValue()
+            throws Exception
+    {
+        String longValue = "2018-00-15 04:59:59 " + "x".repeat(300);
+        ResultSet resultSet = failingTimestampResultSet();
+        when(resultSet.getString("created_at")).thenReturn(longValue);
+
+        CapturedProblemRow captured = new CapturedProblemRow();
+        Exception thrown = readFailingTimestampRow(handlerWithProblemRowLogging(captured), resultSet);
+
+        Assert.assertEquals("created_at", captured.columnName);
+        Assert.assertEquals(longValue.substring(0, 256) + "...", captured.value);
+        Assert.assertEquals("unavailable", captured.primaryKey);
+        Assert.assertFalse(thrown.getMessage().contains(longValue));
+    }
+
+    private JdbcRecordHandler handlerWithProblemRowLogging(CapturedProblemRow captured)
+    {
+        Map<String, String> config = Collections.singletonMap(JdbcRecordHandler.ENABLE_PROBLEM_ROW_LOGGING, "true");
+        return new JdbcRecordHandler(this.amazonS3, this.secretsManager, this.athena,
+                new DatabaseConnectionConfig(TEST_CATALOG, "fakedatabase", CONNECTION_STRING, TEST_SECRET),
+                this.jdbcConnectionFactory, config)
+        {
+            
+            @Override
+            public PreparedStatement buildSplitSql(Connection jdbcConnection, String catalogName, TableName tableName, Schema schema, Constraints constraints, Split split)
+                    throws SQLException
+            {
+                return jdbcConnection.prepareStatement(TEST_SQL);
+            }
+            @Override
+            protected void reportProblemRow(String columnName, String stringValue, String primaryKey, Exception error)
+            {
+                captured.columnName = columnName;
+                captured.value = stringValue;
+                captured.primaryKey = primaryKey;
+            }
+        };
+    }
+
+    private void stubPrimaryKey(String columnName)
+            throws SQLException
+    {
+        ResultSet primaryKeys = Mockito.mock(ResultSet.class);
+        when(primaryKeys.next()).thenReturn(true, false);
+        when(primaryKeys.getShort("KEY_SEQ")).thenReturn((short) 1);
+        when(primaryKeys.getString("COLUMN_NAME")).thenReturn(columnName);
+        when(this.connection.getMetaData().getPrimaryKeys(null, TEST_SCHEMA, TEST_TABLE)).thenReturn(primaryKeys);
+    }
+
+    private ResultSet failingTimestampResultSet()
+            throws SQLException
+    {
+        ResultSet resultSet = Mockito.mock(ResultSet.class);
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.findColumn(anyString())).thenReturn(1);
+        when(resultSet.getInt("id")).thenReturn(2);
+        when(resultSet.wasNull()).thenReturn(false);
+        when(resultSet.getTimestamp("created_at")).thenThrow(new SQLException("MONTH"));
+        return resultSet;
+    }
+
+    private static final class CapturedProblemRow
+    {
+        private String columnName;
+        private String value;
+        private String primaryKey;
+    }
+
+    private Exception readFailingTimestampRow(JdbcRecordHandler handler, ResultSet resultSet)
+            throws Exception
+    {
+        when(this.preparedStatement.executeQuery()).thenReturn(resultSet);
+
+        SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
+        schemaBuilder.addField(FieldBuilder.newBuilder("id", org.apache.arrow.vector.types.Types.MinorType.INT.getType()).build());
+        schemaBuilder.addField(FieldBuilder.newBuilder("created_at", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType()).build());
+        Schema fieldSchema = schemaBuilder.build();
+
+        ConstraintEvaluator constraintEvaluator = Mockito.mock(ConstraintEvaluator.class);
+        when(constraintEvaluator.apply(nullable(String.class), any())).thenReturn(true);
+        S3SpillLocation s3SpillLocation = S3SpillLocation.newBuilder().withIsDirectory(true).build();
+        SpillConfig spillConfig = Mockito.mock(SpillConfig.class);
+        when(spillConfig.getSpillLocation()).thenReturn(s3SpillLocation);
+        BlockAllocator allocator = new BlockAllocatorImpl();
+        BlockSpiller spiller = new S3BlockSpiller(this.amazonS3, spillConfig, allocator, fieldSchema, constraintEvaluator, com.google.common.collect.ImmutableMap.of());
+
+        Split split = Split.newBuilder(s3SpillLocation, null).build();
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(),
+                Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        ReadRecordsRequest request = new ReadRecordsRequest(this.federatedIdentity, TEST_CATALOG, TEST_QUERY_ID,
+                new TableName(TEST_SCHEMA, TEST_TABLE), fieldSchema, split, constraints, 1024, 1024);
+
+        try {
+            handler.readWithConstraint(spiller, request, this.queryStatusChecker);
+            Assert.fail("Expected conversion of the invalid timestamp to fail");
+            return null;
+        }
+        catch (Exception ex) {
+            return ex;
+        }
+        finally {
+            allocator.close();
+        }
+    }
 }
