@@ -276,11 +276,7 @@ public abstract class JdbcRecordHandler
         if (configOptions == null) {
             return false;
         }
-        boolean enabled = Boolean.parseBoolean(configOptions.getOrDefault(ENABLE_PROBLEM_ROW_LOGGING, "false"));
-        if (enabled) {
-            LOGGER.info("PROBLEM ROW LOGGING enable: true");
-        }
-        return enabled;
+        return Boolean.parseBoolean(configOptions.getOrDefault(ENABLE_PROBLEM_ROW_LOGGING, "false"));
     }
 
     /**
