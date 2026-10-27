@@ -42,7 +42,6 @@ import com.amazonaws.athena.connector.lambda.data.writers.extractors.DateDayExtr
 
 import com.amazonaws.athena.connector.lambda.data.writers.holders.NullableVarBinaryHolder;
 import com.amazonaws.athena.connector.lambda.data.writers.holders.NullableVarCharHolder;
-import java.util.HashMap;
 import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.ConstraintEvaluator;
@@ -88,12 +87,14 @@ import java.sql.DatabaseMetaData;
 import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -611,6 +612,39 @@ public class JdbcRecordHandlerTest
         Assert.assertFalse(thrown.getMessage().contains(longValue));
     }
 
+    @Test
+    public void readWithConstraint_unprojectedKeyWhenMysqlGetRowThrows_logsCountedRow()
+            throws Exception
+    {
+        ResultSet resultSet = failingTimestampResultSet();
+        when(resultSet.getString("created_at")).thenReturn("2018-00-15 04:59:59");
+        when(resultSet.getRow()).thenThrow(new SQLException("Operation not allowed for a result set of type ResultSet.TYPE_FORWARD_ONLY."));
+        when(this.connection.getMetaData().getDatabaseProductName()).thenReturn("MySQL");
+        stubPrimaryKey("unprojected_id");
+
+        CapturedProblemRow captured = new CapturedProblemRow();
+        readFailingTimestampRow(handlerWithProblemRowLogging(captured), resultSet);
+
+        Assert.assertEquals("unprojected_id=not-in-projection(row=1)", captured.primaryKey);
+        Mockito.verify(resultSet, Mockito.never()).getString("unprojected_id");
+    }
+
+    @Test
+    public void readWithConstraint_unprojectedKeyWhenGetRowSucceeds_logsDriverRow()
+            throws Exception
+    {
+        ResultSet resultSet = failingTimestampResultSet();
+        when(resultSet.getString("created_at")).thenReturn("2018-00-15 04:59:59");
+        when(resultSet.getRow()).thenReturn(5);
+        when(this.connection.getMetaData().getDatabaseProductName()).thenReturn("PostgreSQL");
+        stubPrimaryKey("unprojected_id");
+
+        CapturedProblemRow captured = new CapturedProblemRow();
+        readFailingTimestampRow(handlerWithProblemRowLogging(captured), resultSet);
+
+        Assert.assertEquals("unprojected_id=not-in-projection(row=5)", captured.primaryKey);
+    }
+
     private JdbcRecordHandler handlerWithProblemRowLogging(CapturedProblemRow captured)
     {
         Map<String, String> config = Collections.singletonMap(JdbcRecordHandler.ENABLE_PROBLEM_ROW_LOGGING, "true");
@@ -642,7 +676,8 @@ public class JdbcRecordHandlerTest
         when(primaryKeys.next()).thenReturn(true, false);
         when(primaryKeys.getShort("KEY_SEQ")).thenReturn((short) 1);
         when(primaryKeys.getString("COLUMN_NAME")).thenReturn(columnName);
-        when(this.connection.getMetaData().getPrimaryKeys(null, TEST_SCHEMA, TEST_TABLE)).thenReturn(primaryKeys);
+        when(this.connection.getCatalog()).thenReturn(TEST_CATALOG);
+        when(this.connection.getMetaData().getPrimaryKeys(TEST_CATALOG, TEST_SCHEMA, TEST_TABLE)).thenReturn(primaryKeys);
     }
 
     private ResultSet failingTimestampResultSet()
@@ -654,6 +689,13 @@ public class JdbcRecordHandlerTest
         when(resultSet.getInt("id")).thenReturn(2);
         when(resultSet.wasNull()).thenReturn(false);
         when(resultSet.getTimestamp("created_at")).thenThrow(new SQLException("MONTH"));
+        ResultSetMetaData metadata = Mockito.mock(ResultSetMetaData.class);
+        when(metadata.getColumnCount()).thenReturn(2);
+        when(metadata.getColumnLabel(1)).thenReturn("id");
+        when(metadata.getColumnLabel(2)).thenReturn("created_at");
+        when(metadata.getColumnName(1)).thenReturn("id");
+        when(metadata.getColumnName(2)).thenReturn("created_at");
+        when(resultSet.getMetaData()).thenReturn(metadata);
         return resultSet;
     }
 

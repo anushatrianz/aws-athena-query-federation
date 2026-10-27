@@ -84,6 +84,7 @@ import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -112,6 +113,12 @@ public abstract class JdbcRecordHandler
      */
     static final String ENABLE_PROBLEM_ROW_LOGGING = "enable_problem_row_logging";
     private static final int MAX_LOGGED_VALUE_LENGTH = 256;
+    private static final String MYSQL_PRODUCT_NAME = "MySQL";
+    /**
+ * count of rows read from a MySQL streaming result. Connector/J rejects {@code ResultSet.getRow()}
+ * when {@code fetchSize} is {@code Integer.MIN_VALUE}. Other drivers use {@code getRow()}.
+ */
+private int mysqlStreamedRow;
 
     protected final JdbcQueryPassthrough queryPassthrough = new JdbcQueryPassthrough();
 
@@ -179,6 +186,8 @@ public abstract class JdbcRecordHandler
             List<String> primaryKeyColumns = logProblemRows
                     ? lookupPrimaryKeyColumns(connection, readRecordsRequest.getTableName())
                     : Collections.emptyList();
+            mysqlStreamedRow = 0;
+            boolean trackMysqlStreamedRow = logProblemRows && MYSQL_PRODUCT_NAME.equalsIgnoreCase(databaseProductName);
 
             try (PreparedStatement preparedStatement = buildSplitSql(connection, readRecordsRequest.getCatalogName(), readRecordsRequest.getTableName(),
                     readRecordsRequest.getSchema(), readRecordsRequest.getConstraints(), readRecordsRequest.getSplit());
@@ -194,6 +203,9 @@ public abstract class JdbcRecordHandler
                 GeneratedRowWriter rowWriter = rowWriterBuilder.build();
                 int rowsReturnedFromDatabase = 0;
                 while (resultSet.next()) {
+                    if (trackMysqlStreamedRow) {
+                        mysqlStreamedRow++;
+                    }
                     if (!queryStatusChecker.isQueryRunning()) {
                         return;
                     }
@@ -285,9 +297,14 @@ public abstract class JdbcRecordHandler
     protected List<String> lookupPrimaryKeyColumns(Connection connection, TableName tableName)
     {
         Map<Short, String> ordered = new TreeMap<>();
-        try (ResultSet keys = connection.getMetaData().getPrimaryKeys(null, tableName.getSchemaName(), tableName.getTableName())) {
+        try (ResultSet keys = connection.getMetaData().getPrimaryKeys(
+                connection.getCatalog(), tableName.getSchemaName(), tableName.getTableName())) {
             while (keys != null && keys.next()) {
                 ordered.put(keys.getShort("KEY_SEQ"), keys.getString("COLUMN_NAME"));
+            }
+            if (ordered.isEmpty()) {
+                LOGGER.warn("enable_problem_row_logging is set but no primary key metadata was found for {}.{}",
+                        tableName.getSchemaName(), tableName.getTableName());
             }
         }
         catch (SQLException e) {
@@ -365,7 +382,12 @@ public abstract class JdbcRecordHandler
             action.run();
         }
         catch (Exception e) {
-            logProblemRow(fieldName, resultSet, primaryKeyColumns, e);
+            try {
+                logProblemRow(fieldName, resultSet, primaryKeyColumns, e);
+            }
+            catch (Exception loggingFailure) {
+                LOGGER.warn("Failed to log problem row for column {}: {}", fieldName, loggingFailure.toString());
+            }
             throw e;
         }
     }
@@ -397,7 +419,7 @@ public abstract class JdbcRecordHandler
             }
             return value;
         }
-        catch (SQLException e) {
+        catch (Exception e) {
             return "<unreadable>";
         }
     }
@@ -409,9 +431,47 @@ public abstract class JdbcRecordHandler
         }
         List<String> parts = new ArrayList<>();
         for (String column : primaryKeyColumns) {
-            parts.add(column + "=" + readCellAsString(resultSet, column));
+            if (!isColumnProjected(resultSet, column)) {
+                parts.add(column + "=not-in-projection(row=" + resultPosition(resultSet) + ")");
+            }
+            else {
+                parts.add(column + "=" + readCellAsString(resultSet, column));
+            }
         }
         return String.join(", ", parts);
+    }
+
+    private String resultPosition(ResultSet resultSet)
+    {
+        try {
+            int row = resultSet.getRow();
+            if (row > 0) {
+                return Integer.toString(row);
+            }
+        }
+        catch (SQLException e) {
+            if (mysqlStreamedRow > 0) {
+                return Integer.toString(mysqlStreamedRow);
+            }
+        }
+        return "<unreadable>";
+    }
+
+    private boolean isColumnProjected(ResultSet resultSet, String columnName)
+    {
+        try {
+            ResultSetMetaData metadata = resultSet.getMetaData();
+            for (int index = 1; index <= metadata.getColumnCount(); index++) {
+                if (columnName.equalsIgnoreCase(metadata.getColumnLabel(index))
+                        || columnName.equalsIgnoreCase(metadata.getColumnName(index))) {
+                    return true;
+                }
+            }
+        }
+        catch (SQLException e) {
+            return false;
+        }
+        return false;
     }
 
     @FunctionalInterface
