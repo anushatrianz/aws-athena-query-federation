@@ -602,13 +602,14 @@ public class JdbcRecordHandlerTest
         String longValue = "2018-00-15 04:59:59 " + "x".repeat(300);
         ResultSet resultSet = failingTimestampResultSet();
         when(resultSet.getString("created_at")).thenReturn(longValue);
+        when(resultSet.getRow()).thenReturn(12);
 
         CapturedProblemRow captured = new CapturedProblemRow();
         Exception thrown = readFailingTimestampRow(handlerWithProblemRowLogging(captured), resultSet);
 
         Assert.assertEquals("created_at", captured.columnName);
         Assert.assertEquals(longValue.substring(0, 256) + "...", captured.value);
-        Assert.assertEquals("unavailable", captured.primaryKey);
+        Assert.assertEquals("unavailable(row=12)", captured.primaryKey);
         Assert.assertFalse(thrown.getMessage().contains(longValue));
     }
 

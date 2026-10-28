@@ -115,10 +115,10 @@ public abstract class JdbcRecordHandler
     private static final int MAX_LOGGED_VALUE_LENGTH = 256;
     private static final String MYSQL_PRODUCT_NAME = "MySQL";
     /**
- * count of rows read from a MySQL streaming result. Connector/J rejects {@code ResultSet.getRow()}
- * when {@code fetchSize} is {@code Integer.MIN_VALUE}. Other drivers use {@code getRow()}.
- */
-private int mysqlStreamedRow;
+     * count of rows read from a MySQL streaming result. Connector/J rejects {@code ResultSet.getRow()}
+     * when {@code fetchSize} is {@code Integer.MIN_VALUE}. Other drivers use {@code getRow()}.
+     */
+    private int mysqlStreamedRow;
 
     protected final JdbcQueryPassthrough queryPassthrough = new JdbcQueryPassthrough();
 
@@ -427,7 +427,7 @@ private int mysqlStreamedRow;
     private String formatPrimaryKey(ResultSet resultSet, List<String> primaryKeyColumns)
     {
         if (primaryKeyColumns == null || primaryKeyColumns.isEmpty()) {
-            return "unavailable";
+            return "unavailable(row=" + resultPosition(resultSet) + ")";
         }
         List<String> parts = new ArrayList<>();
         for (String column : primaryKeyColumns) {
