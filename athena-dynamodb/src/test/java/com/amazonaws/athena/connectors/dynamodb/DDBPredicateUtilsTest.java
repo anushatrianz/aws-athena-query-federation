@@ -20,6 +20,7 @@
 package com.amazonaws.athena.connectors.dynamodb;
 
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
+import com.amazonaws.athena.connector.lambda.domain.predicate.AllOrNoneValueSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.EquatableValueSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
 import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
@@ -163,11 +164,11 @@ public class DDBPredicateUtilsTest
               ), 1000, 10, 5);
         assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0", "col1"), ImmutableMap.of("hashKey", singleValueSet)).getName());
         assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0", "col1", "col2"), ImmutableMap.of("hashKey", singleValueSet)).getName());
-        assertEquals("col0-gsi", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0", "col1"), ImmutableMap.of("col0", singleValueSet)).getName());
-        assertEquals("col0-gsi", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0", "col1", "col2"), ImmutableMap.of("col0", singleValueSet)).getName());
-        assertEquals("col0-gsi", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0"), ImmutableMap.of("col0", singleValueSet)).getName());
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0", "col1"), ImmutableMap.of("col0", singleValueSet)).getName());
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0", "col1", "col2"), ImmutableMap.of("col0", singleValueSet)).getName());
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0"), ImmutableMap.of("col0", singleValueSet)).getName());
         assertEquals("col0-gsi", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0"), ImmutableMap.of("col0", singleValueSet, "col1", singleValueSet)).getName());
-        assertEquals("col0-gsi", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0"), ImmutableMap.of("col0", singleValueSet, "sortKey", singleValueSet)).getName());
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0"), ImmutableMap.of("col0", singleValueSet, "sortKey", singleValueSet)).getName());
         assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0"), ImmutableMap.of("col1", singleValueSet)).getName());
         assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("hashKey", "sortKey", "col0"), ImmutableMap.of("col1", singleValueSet, "hashKey", singleValueSet)).getName());
 
@@ -646,6 +647,64 @@ public class DDBPredicateUtilsTest
         assertEquals("col0-lsi", result.getName());
         assertEquals("hashKey", result.getHashKey());
         assertEquals(Optional.of("col0"), result.getRangeKey());
+    }
+
+    @Test
+    public void getBestIndexForPredicates_withSparseGsiRangeKey_selectsTableUnlessRangeKeyExcludesNull()
+    {
+        ValueSet hashValue = SortedRangeSet.of(Range.equal(new BlockAllocatorImpl(), VARCHAR.getType(), "a"));
+        ValueSet rangeValue = SortedRangeSet.of(Range.equal(new BlockAllocatorImpl(), VARCHAR.getType(), "b"));
+        ValueSet rangeNotNull = new AllOrNoneValueSet(VARCHAR.getType(), true, false);
+        ValueSet rangeIsNull = new AllOrNoneValueSet(VARCHAR.getType(), false, true);
+        DynamoDBTable table = new DynamoDBTable("tableName", "id", Optional.empty(),
+                ImmutableList.of(
+                        AttributeDefinition.builder().attributeName("id").attributeType(ScalarAttributeType.S).build(),
+                        AttributeDefinition.builder().attributeName("gsi_pk").attributeType(ScalarAttributeType.S).build(),
+                        AttributeDefinition.builder().attributeName("gsi_rk").attributeType(ScalarAttributeType.S).build()),
+                ImmutableList.of(
+                        new DynamoDBIndex("gsi_pk-gsi_rk-index", "gsi_pk", Optional.of("gsi_rk"), ProjectionType.ALL, ImmutableList.of())
+                ), 1000, 10, 5);
+
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("id"), ImmutableMap.of("gsi_pk", hashValue)).getName());
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("id"), ImmutableMap.of("gsi_pk", hashValue, "gsi_rk", rangeIsNull)).getName());
+        assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("id"), ImmutableMap.of("gsi_pk", hashValue, "gsi_rk", rangeValue)).getName());
+        assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("id"), ImmutableMap.of("gsi_pk", hashValue, "gsi_rk", rangeNotNull)).getName());
+    }
+
+    @Test
+    public void getBestIndexForPredicatesForPlan_withSparseGsiRangeKey_selectsTableUnlessRangeKeyExcludesNull()
+    {
+        DynamoDBTable table = new DynamoDBTable("tableName", "id", Optional.empty(),
+                ImmutableList.of(
+                        AttributeDefinition.builder().attributeName("id").attributeType(ScalarAttributeType.S).build(),
+                        AttributeDefinition.builder().attributeName("gsi_pk").attributeType(ScalarAttributeType.S).build(),
+                        AttributeDefinition.builder().attributeName("gsi_rk").attributeType(ScalarAttributeType.S).build()),
+                ImmutableList.of(
+                        new DynamoDBIndex("gsi_pk-gsi_rk-index", "gsi_pk", Optional.of("gsi_rk"), ProjectionType.ALL, ImmutableList.of())
+                ), 1000, 10, 5);
+
+        Map<String, List<ColumnPredicate>> hashOnly = ImmutableMap.of(
+                "gsi_pk", ImmutableList.of(new ColumnPredicate("gsi_pk", SubstraitOperator.EQUAL, "a", new ArrowType.Utf8()))
+        );
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, ImmutableList.of("id"), hashOnly).getName());
+
+        Map<String, List<ColumnPredicate>> hashAndNullRange = ImmutableMap.of(
+                "gsi_pk", ImmutableList.of(new ColumnPredicate("gsi_pk", SubstraitOperator.EQUAL, "a", new ArrowType.Utf8())),
+                "gsi_rk", ImmutableList.of(new ColumnPredicate("gsi_rk", SubstraitOperator.IS_NULL, null, new ArrowType.Utf8()))
+        );
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, ImmutableList.of("id"), hashAndNullRange).getName());
+
+        Map<String, List<ColumnPredicate>> hashAndRange = ImmutableMap.of(
+                "gsi_pk", ImmutableList.of(new ColumnPredicate("gsi_pk", SubstraitOperator.EQUAL, "a", new ArrowType.Utf8())),
+                "gsi_rk", ImmutableList.of(new ColumnPredicate("gsi_rk", SubstraitOperator.EQUAL, "b", new ArrowType.Utf8()))
+        );
+        assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, ImmutableList.of("id"), hashAndRange).getName());
+
+        Map<String, List<ColumnPredicate>> hashAndNotNullRange = ImmutableMap.of(
+                "gsi_pk", ImmutableList.of(new ColumnPredicate("gsi_pk", SubstraitOperator.EQUAL, "a", new ArrowType.Utf8())),
+                "gsi_rk", ImmutableList.of(new ColumnPredicate("gsi_rk", SubstraitOperator.IS_NOT_NULL, null, new ArrowType.Utf8()))
+        );
+        assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, ImmutableList.of("id"), hashAndNotNullRange).getName());
     }
 
     @Test

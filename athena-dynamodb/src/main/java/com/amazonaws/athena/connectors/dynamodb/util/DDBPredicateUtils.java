@@ -79,7 +79,8 @@ public class DDBPredicateUtils
         Set<String> columnNames = predicates.keySet();
         return findBestIndexInternal(table, requestedCols,
                 columnNames::contains,
-            columnName -> !getHashKeyAttributeValues(predicates.get(columnName)).isEmpty());
+            columnName -> !getHashKeyAttributeValues(predicates.get(columnName)).isEmpty(),
+            columnName -> excludesNullValues(predicates.get(columnName)));
     }
 
     public static DynamoDBIndex getBestIndexForPredicatesForPlan(DynamoDBTable table,
@@ -195,7 +196,31 @@ public class DDBPredicateUtils
     {
         return findBestIndexInternal(table, requestedCols,
                 columnPredicatesMap::containsKey,
-            columnName -> !getHashKeyAttributeValues(columnPredicatesMap.get(columnName)).isEmpty());
+            columnName -> !getHashKeyAttributeValues(columnPredicatesMap.get(columnName)).isEmpty(),
+            columnName -> excludesNullValues(columnPredicatesMap.get(columnName)));
+    }
+
+    /**
+     * A predicate filters out null when every accepted value is non-null. Equality, comparisons, and
+     * {@code IS NOT NULL} do. {@code IS NULL} does not: those items are absent from a GSI that uses
+     * the column as a key.
+     */
+    private static boolean excludesNullValues(ValueSet valueSet)
+    {
+        return valueSet != null && !valueSet.isNullAllowed() && !valueSet.isNone();
+    }
+
+    private static boolean excludesNullValues(List<ColumnPredicate> columnPredicates)
+    {
+        if (columnPredicates == null || columnPredicates.isEmpty()) {
+            return false;
+        }
+        for (ColumnPredicate columnPredicate : columnPredicates) {
+            if (SubstraitOperator.IS_NULL.equals(columnPredicate.getOperator())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static DynamoDBIndex createTableIndex(DynamoDBTable table)
@@ -206,7 +231,8 @@ public class DDBPredicateUtils
     private static DynamoDBIndex findBestIndexInternal(DynamoDBTable table,
                                                       List<String> requestedCols,
                                                       Predicate<String> hasPredicateForColumn,
-                                                      Predicate<String> hasValidHashKeyValues)
+                                                      Predicate<String> hasValidHashKeyValues,
+                                                      Predicate<String> rangeKeyExcludesNull)
     {
         DynamoDBIndex tableIndex = createTableIndex(table);
 
@@ -228,10 +254,12 @@ public class DDBPredicateUtils
                 .forEach(hashKeyMatchesBuilder::add);
         List<DynamoDBIndex> hashKeyMatches = hashKeyMatchesBuilder.build();
 
-        // collect range key matches
+        // A GSI with a sort key omits items that do not have that attribute. Use it only when the
+        // query's sort-key predicate rejects those nulls, for example gsi_rk = 'b' or gsi_rk IS NOT NULL.
+        // The base table contains every item, so any predicate on its sort key is enough.
         List<DynamoDBIndex> rangeKeyMatches = Stream.concat(
                 tableIndex.getRangeKey().filter(hasPredicateForColumn).stream().map(key -> tableIndex),
-                candidateIndices.stream().filter(index -> index.getRangeKey().filter(hasPredicateForColumn).isPresent())
+                candidateIndices.stream().filter(index -> index.getRangeKey().filter(rangeKeyExcludesNull).isPresent())
         ).collect(Collectors.toList());
 
         // return first index where both hash and range key can be specified with predicates
@@ -240,8 +268,14 @@ public class DDBPredicateUtils
                 return index;
             }
         }
-        // else return the first index with a hash key predicate, or the original table if there are none
-        return hashKeyMatches.isEmpty() ? tableIndex : hashKeyMatches.get(0);
+        // A hash-key-only match is safe for the base table and for an index that has no sort key.
+        // An index that has a sort key is sparse relative to a query that does not constrain that sort key.
+        for (DynamoDBIndex index : hashKeyMatches) {
+            if (index == tableIndex || index.getRangeKey().isEmpty()) {
+                return index;
+            }
+        }
+        return tableIndex;
     }
 
     /*
