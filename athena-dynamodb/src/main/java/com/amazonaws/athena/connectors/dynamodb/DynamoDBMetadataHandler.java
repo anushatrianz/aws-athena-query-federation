@@ -393,7 +393,6 @@ public class DynamoDBMetadataHandler
         Map<String, List<ColumnPredicate>> filterPredicates = new HashMap<>();
         boolean useQueryPlan = false;
         if (Objects.nonNull(queryPlan)) {
-            logger.warn("queryPlan is executing "+queryPlan.getSubstraitPlan().toString());
             plan = SubstraitRelUtils.deserializeSubstraitPlan(queryPlan.getSubstraitPlan());
             filterPredicates = buildFilterPredicatesFromPlan(plan);
             index = DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, requestedCols, filterPredicates);
