@@ -19,6 +19,7 @@
  */
 package com.amazonaws.athena.connectors.dynamodb.util;
 
+import com.amazonaws.athena.connector.lambda.domain.predicate.AllOrNoneValueSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.EquatableValueSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Marker;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
@@ -221,6 +222,25 @@ public class DDBPredicateUtils
             }
         }
         return true;
+    }
+
+    /**
+     * True when the predicate is only {@code IS NOT NULL}. A DynamoDB key condition cannot express that,
+     * and a query on an index sort key already returns only items that have the attribute.
+     */
+    public static boolean isSortKeyPresenceOnly(ValueSet valueSet)
+    {
+        if (valueSet == null || valueSet.isNullAllowed() || valueSet.isNone()) {
+            return false;
+        }
+        return valueSet.isAll() || valueSet instanceof AllOrNoneValueSet;
+    }
+
+    public static boolean isSortKeyPresenceOnly(List<ColumnPredicate> columnPredicates)
+    {
+        return columnPredicates != null
+                && columnPredicates.size() == 1
+                && SubstraitOperator.IS_NOT_NULL.equals(columnPredicates.get(0).getOperator());
     }
 
     private static DynamoDBIndex createTableIndex(DynamoDBTable table)

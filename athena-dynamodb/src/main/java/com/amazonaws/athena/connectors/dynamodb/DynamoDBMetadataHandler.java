@@ -393,6 +393,7 @@ public class DynamoDBMetadataHandler
         Map<String, List<ColumnPredicate>> filterPredicates = new HashMap<>();
         boolean useQueryPlan = false;
         if (Objects.nonNull(queryPlan)) {
+            logger.warn("queryPlan is executing "+queryPlan.getSubstraitPlan().toString());
             plan = SubstraitRelUtils.deserializeSubstraitPlan(queryPlan.getSubstraitPlan());
             filterPredicates = buildFilterPredicatesFromPlan(plan);
             index = DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, requestedCols, filterPredicates);
@@ -733,10 +734,19 @@ public class DynamoDBMetadataHandler
         String rangeKeyFilter = null;
         
         if (!useQueryPlan && summary.containsKey(rangeKeyName)) {
+            if (DDBPredicateUtils.isSortKeyPresenceOnly(summary.get(rangeKeyName))) {
+                // IS NOT NULL is already implied by querying this sort key. It is not a valid key condition.
+                columnsToIgnore.add(rangeKeyName);
+                return;
+            }
             rangeKeyFilter = DDBPredicateUtils.generateSingleColumnFilter(
                 rangeKeyName, summary.get(rangeKeyName), valueAccumulator, valueNameProducer, recordMetadata, true);
         }
         else if (useQueryPlan && filterPredicates.containsKey(rangeKeyName)) {
+            if (DDBPredicateUtils.isSortKeyPresenceOnly(filterPredicates.get(rangeKeyName))) {
+                columnsToIgnore.add(rangeKeyName);
+                return;
+            }
             rangeKeyFilter = DDBPredicateUtils.generateSingleColumnFilter(
                 rangeKeyName, filterPredicates.get(rangeKeyName), valueAccumulator, valueNameProducer, recordMetadata, true);
         }

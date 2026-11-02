@@ -669,6 +669,13 @@ public class DDBPredicateUtilsTest
         assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("id"), ImmutableMap.of("gsi_pk", hashValue, "gsi_rk", rangeIsNull)).getName());
         assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("id"), ImmutableMap.of("gsi_pk", hashValue, "gsi_rk", rangeValue)).getName());
         assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("id"), ImmutableMap.of("gsi_pk", hashValue, "gsi_rk", rangeNotNull)).getName());
+        assertTrue(DDBPredicateUtils.isSortKeyPresenceOnly(rangeNotNull));
+        assertFalse(DDBPredicateUtils.isSortKeyPresenceOnly(rangeIsNull));
+        assertFalse(DDBPredicateUtils.isSortKeyPresenceOnly(rangeValue));
+        assertTrue(DDBPredicateUtils.isSortKeyPresenceOnly(ImmutableList.of(
+                new ColumnPredicate("gsi_rk", SubstraitOperator.IS_NOT_NULL, null, new ArrowType.Utf8()))));
+        assertFalse(DDBPredicateUtils.isSortKeyPresenceOnly(ImmutableList.of(
+                new ColumnPredicate("gsi_rk", SubstraitOperator.EQUAL, "b", new ArrowType.Utf8()))));
     }
 
     @Test
