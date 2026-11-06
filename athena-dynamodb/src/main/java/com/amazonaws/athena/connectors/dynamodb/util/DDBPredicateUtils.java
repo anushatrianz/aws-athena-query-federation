@@ -243,6 +243,36 @@ public class DDBPredicateUtils
                 && SubstraitOperator.IS_NOT_NULL.equals(columnPredicates.get(0).getOperator());
     }
 
+    /**
+     * True when the predicate is only {@code IS NULL}. DynamoDB cannot express that as a key condition,
+     * and FilterExpression also cannot reference primary key attributes. Callers should skip push-down
+     * (Athena residual filtering returns no rows for table sort keys, which always exist).
+     * Athena may send this as {@link AllOrNoneValueSet} or {@link SortedRangeSet#onlyNull}.
+     */
+    public static boolean isSortKeyNullOnly(ValueSet valueSet)
+    {
+        if (valueSet == null || !valueSet.isNullAllowed() || valueSet.isAll()) {
+            return false;
+        }
+        if (valueSet instanceof SortedRangeSet) {
+            return valueSet.getRanges().getOrderedRanges().isEmpty();
+        }
+        if (valueSet instanceof AllOrNoneValueSet) {
+            return !valueSet.isNone();
+        }
+        if (valueSet instanceof EquatableValueSet) {
+            return ((EquatableValueSet) valueSet).getValueBlock().getRowCount() == 0;
+        }
+        return false;
+    }
+
+    public static boolean isSortKeyNullOnly(List<ColumnPredicate> columnPredicates)
+    {
+        return columnPredicates != null
+                && columnPredicates.size() == 1
+                && SubstraitOperator.IS_NULL.equals(columnPredicates.get(0).getOperator());
+    }
+
     private static DynamoDBIndex createTableIndex(DynamoDBTable table)
     {
         return new DynamoDBIndex(table.getName(), table.getHashKey(), table.getRangeKey(), ProjectionType.ALL, ImmutableList.of());

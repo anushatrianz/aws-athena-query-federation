@@ -656,14 +656,7 @@ public class DDBPredicateUtilsTest
         ValueSet rangeValue = SortedRangeSet.of(Range.equal(new BlockAllocatorImpl(), VARCHAR.getType(), "b"));
         ValueSet rangeNotNull = new AllOrNoneValueSet(VARCHAR.getType(), true, false);
         ValueSet rangeIsNull = new AllOrNoneValueSet(VARCHAR.getType(), false, true);
-        DynamoDBTable table = new DynamoDBTable("tableName", "id", Optional.empty(),
-                ImmutableList.of(
-                        AttributeDefinition.builder().attributeName("id").attributeType(ScalarAttributeType.S).build(),
-                        AttributeDefinition.builder().attributeName("gsi_pk").attributeType(ScalarAttributeType.S).build(),
-                        AttributeDefinition.builder().attributeName("gsi_rk").attributeType(ScalarAttributeType.S).build()),
-                ImmutableList.of(
-                        new DynamoDBIndex("gsi_pk-gsi_rk-index", "gsi_pk", Optional.of("gsi_rk"), ProjectionType.ALL, ImmutableList.of())
-                ), 1000, 10, 5);
+        DynamoDBTable table = createSparseGsiTable();
 
         assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("id"), ImmutableMap.of("gsi_pk", hashValue)).getName());
         assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicates(table, ImmutableList.of("id"), ImmutableMap.of("gsi_pk", hashValue, "gsi_rk", rangeIsNull)).getName());
@@ -676,42 +669,30 @@ public class DDBPredicateUtilsTest
                 new ColumnPredicate("gsi_rk", SubstraitOperator.IS_NOT_NULL, null, new ArrowType.Utf8()))));
         assertFalse(DDBPredicateUtils.isSortKeyPresenceOnly(ImmutableList.of(
                 new ColumnPredicate("gsi_rk", SubstraitOperator.EQUAL, "b", new ArrowType.Utf8()))));
+        assertTrue(DDBPredicateUtils.isSortKeyNullOnly(rangeIsNull));
+        assertFalse(DDBPredicateUtils.isSortKeyNullOnly(rangeNotNull));
+        assertFalse(DDBPredicateUtils.isSortKeyNullOnly(rangeValue));
+        assertTrue(DDBPredicateUtils.isSortKeyNullOnly(SortedRangeSet.onlyNull(VARCHAR.getType())));
+        assertFalse(DDBPredicateUtils.isSortKeyNullOnly(SortedRangeSet.none(VARCHAR.getType())));
+        assertTrue(DDBPredicateUtils.isSortKeyNullOnly(ImmutableList.of(
+                new ColumnPredicate("gsi_rk", SubstraitOperator.IS_NULL, null, new ArrowType.Utf8()))));
+        assertFalse(DDBPredicateUtils.isSortKeyNullOnly(ImmutableList.of(
+                new ColumnPredicate("gsi_rk", SubstraitOperator.IS_NOT_NULL, null, new ArrowType.Utf8()))));
     }
 
     @Test
     public void getBestIndexForPredicatesForPlan_withSparseGsiRangeKey_selectsTableUnlessRangeKeyExcludesNull()
     {
-        DynamoDBTable table = new DynamoDBTable("tableName", "id", Optional.empty(),
-                ImmutableList.of(
-                        AttributeDefinition.builder().attributeName("id").attributeType(ScalarAttributeType.S).build(),
-                        AttributeDefinition.builder().attributeName("gsi_pk").attributeType(ScalarAttributeType.S).build(),
-                        AttributeDefinition.builder().attributeName("gsi_rk").attributeType(ScalarAttributeType.S).build()),
-                ImmutableList.of(
-                        new DynamoDBIndex("gsi_pk-gsi_rk-index", "gsi_pk", Optional.of("gsi_rk"), ProjectionType.ALL, ImmutableList.of())
-                ), 1000, 10, 5);
+        DynamoDBTable table = createSparseGsiTable();
 
-        Map<String, List<ColumnPredicate>> hashOnly = ImmutableMap.of(
-                "gsi_pk", ImmutableList.of(new ColumnPredicate("gsi_pk", SubstraitOperator.EQUAL, "a", new ArrowType.Utf8()))
-        );
-        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, ImmutableList.of("id"), hashOnly).getName());
-
-        Map<String, List<ColumnPredicate>> hashAndNullRange = ImmutableMap.of(
-                "gsi_pk", ImmutableList.of(new ColumnPredicate("gsi_pk", SubstraitOperator.EQUAL, "a", new ArrowType.Utf8())),
-                "gsi_rk", ImmutableList.of(new ColumnPredicate("gsi_rk", SubstraitOperator.IS_NULL, null, new ArrowType.Utf8()))
-        );
-        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, ImmutableList.of("id"), hashAndNullRange).getName());
-
-        Map<String, List<ColumnPredicate>> hashAndRange = ImmutableMap.of(
-                "gsi_pk", ImmutableList.of(new ColumnPredicate("gsi_pk", SubstraitOperator.EQUAL, "a", new ArrowType.Utf8())),
-                "gsi_rk", ImmutableList.of(new ColumnPredicate("gsi_rk", SubstraitOperator.EQUAL, "b", new ArrowType.Utf8()))
-        );
-        assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, ImmutableList.of("id"), hashAndRange).getName());
-
-        Map<String, List<ColumnPredicate>> hashAndNotNullRange = ImmutableMap.of(
-                "gsi_pk", ImmutableList.of(new ColumnPredicate("gsi_pk", SubstraitOperator.EQUAL, "a", new ArrowType.Utf8())),
-                "gsi_rk", ImmutableList.of(new ColumnPredicate("gsi_rk", SubstraitOperator.IS_NOT_NULL, null, new ArrowType.Utf8()))
-        );
-        assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicatesForPlan(table, ImmutableList.of("id"), hashAndNotNullRange).getName());
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicatesForPlan(
+                table, ImmutableList.of("id"), createSparseGsiPredicates(null, null)).getName());
+        assertEquals("tableName", DDBPredicateUtils.getBestIndexForPredicatesForPlan(
+                table, ImmutableList.of("id"), createSparseGsiPredicates(SubstraitOperator.IS_NULL, null)).getName());
+        assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicatesForPlan(
+                table, ImmutableList.of("id"), createSparseGsiPredicates(SubstraitOperator.EQUAL, "b")).getName());
+        assertEquals("gsi_pk-gsi_rk-index", DDBPredicateUtils.getBestIndexForPredicatesForPlan(
+                table, ImmutableList.of("id"), createSparseGsiPredicates(SubstraitOperator.IS_NOT_NULL, null)).getName());
     }
 
     @Test
@@ -978,5 +959,29 @@ public class DDBPredicateUtilsTest
         assertEquals("First value should match VALUE_1", DDBPredicateUtilsTest.VALUE_1, accumulator.get(0).s());
         assertEquals("Second value should match VALUE_2", DDBPredicateUtilsTest.VALUE_2, accumulator.get(1).s());
         assertEquals("Third value should match VALUE_3", DDBPredicateUtilsTest.VALUE_3, accumulator.get(2).s());
+    }
+
+    private DynamoDBTable createSparseGsiTable()
+    {
+        return new DynamoDBTable("tableName", "id", Optional.empty(),
+                ImmutableList.of(
+                        AttributeDefinition.builder().attributeName("id").attributeType(ScalarAttributeType.S).build(),
+                        AttributeDefinition.builder().attributeName("gsi_pk").attributeType(ScalarAttributeType.S).build(),
+                        AttributeDefinition.builder().attributeName("gsi_rk").attributeType(ScalarAttributeType.S).build()),
+                ImmutableList.of(
+                        new DynamoDBIndex("gsi_pk-gsi_rk-index", "gsi_pk", Optional.of("gsi_rk"), ProjectionType.ALL, ImmutableList.of())
+                ), 1000, 10, 5);
+    }
+
+    private Map<String, List<ColumnPredicate>> createSparseGsiPredicates(SubstraitOperator rangeKeyOperator, Object rangeKeyValue)
+    {
+        ImmutableMap.Builder<String, List<ColumnPredicate>> builder = ImmutableMap.builder();
+        builder.put("gsi_pk", ImmutableList.of(
+                new ColumnPredicate("gsi_pk", SubstraitOperator.EQUAL, "a", new ArrowType.Utf8())));
+        if (rangeKeyOperator != null) {
+            builder.put("gsi_rk", ImmutableList.of(
+                    new ColumnPredicate("gsi_rk", rangeKeyOperator, rangeKeyValue, new ArrowType.Utf8())));
+        }
+        return builder.build();
     }
 }

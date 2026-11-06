@@ -738,11 +738,23 @@ public class DynamoDBMetadataHandler
                 columnsToIgnore.add(rangeKeyName);
                 return;
             }
+            if (DDBPredicateUtils.isSortKeyNullOnly(summary.get(rangeKeyName))) {
+                // IS NULL cannot be a key condition, and FilterExpression cannot reference primary key
+                // attributes. Ignore push-down; Athena residual filtering yields no rows for table keys.
+                columnsToIgnore.add(rangeKeyName);
+                return;
+            }
             rangeKeyFilter = DDBPredicateUtils.generateSingleColumnFilter(
                 rangeKeyName, summary.get(rangeKeyName), valueAccumulator, valueNameProducer, recordMetadata, true);
         }
         else if (useQueryPlan && filterPredicates.containsKey(rangeKeyName)) {
             if (DDBPredicateUtils.isSortKeyPresenceOnly(filterPredicates.get(rangeKeyName))) {
+                columnsToIgnore.add(rangeKeyName);
+                return;
+            }
+            if (DDBPredicateUtils.isSortKeyNullOnly(filterPredicates.get(rangeKeyName))) {
+                // IS NULL cannot be a key condition, and FilterExpression cannot reference primary key
+                // attributes. Ignore push-down; Athena residual filtering yields no rows for table keys.
                 columnsToIgnore.add(rangeKeyName);
                 return;
             }
