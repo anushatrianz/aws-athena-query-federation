@@ -101,4 +101,14 @@ public class AthenaConnectorException extends RuntimeException
     {
         return errorDetails;
     }
+
+    @Override
+    public String getMessage()
+    {
+        String message = super.getMessage();
+        if (errorDetails != null && errorDetails.errorCode() != null) {
+            return message + " [" + errorDetails.errorCode() + "]";
+        }
+        return message;
+    }
 }

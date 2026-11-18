@@ -29,6 +29,7 @@ import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.functions.StandardFunctions;
 import com.amazonaws.athena.connector.lambda.domain.spill.SpillLocation;
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesResponse;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsRequest;
@@ -63,6 +64,8 @@ import org.postgresql.core.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.athena.AthenaClient;
+import software.amazon.awssdk.services.glue.model.ErrorDetails;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 
 import java.sql.Connection;
@@ -272,7 +275,8 @@ public class PostGreSqlMetadataHandler
                     splits.add(splitBuilder.build());
 
                     if (splits.size() >= MAX_SPLITS_PER_REQUEST) {
-                        throw new RuntimeException("Max splits supported with splitter " + MAX_SPLITS_PER_REQUEST);
+                        throw new AthenaConnectorException("Max splits supported with splitter " + MAX_SPLITS_PER_REQUEST,
+                                ErrorDetails.builder().errorCode(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString()).build());
                     }
 
                     splitterUsed = true;
@@ -563,7 +567,8 @@ public class PostGreSqlMetadataHandler
         }
         catch (SQLException ex) {
             // Only thrown for a NUL byte, which isValidSplitColumn already rejects before we get here.
-            throw new RuntimeException("Unable to escape SQL identifier", ex);
+            throw new AthenaConnectorException("Unable to escape SQL identifier", ex,
+                    ErrorDetails.builder().errorCode(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString()).build());
         }
     }
 

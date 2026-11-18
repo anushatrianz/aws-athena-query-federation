@@ -32,4 +32,10 @@ public class PostGreSqlMuxCompositeHandler
     {
         super(PostGreSqlMuxMetadataHandler.class, PostGreSqlMuxRecordHandler.class, PostGreSqlMetadataHandler.class, PostGreSqlRecordHandler.class);
     }
+
+    @Override
+    public Exception handleException(Exception e)
+    {
+        return PostGreSqlCompositeHandler.handlePostGreSqlException(super.handleException(e));
+    }
 }

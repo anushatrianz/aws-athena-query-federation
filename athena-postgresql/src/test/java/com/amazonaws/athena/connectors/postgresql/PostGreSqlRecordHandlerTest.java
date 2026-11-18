@@ -49,6 +49,7 @@ import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.athena.AthenaClient;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 
@@ -345,6 +346,32 @@ public class PostGreSqlRecordHandlerTest extends TestBase
         this.postGreSqlRecordHandler.buildSplitSql(this.connection, "testCatalogName", tableName, schema, constraints, split);
 
         logger.info("buildSplitSqlWithPermissionErrorTest - exit");
+    }
+
+    @Test
+    public void buildSplitSqlWithInsufficientPrivilegeSqlStateTest()
+            throws SQLException
+    {
+        TableName tableName = new TableName(TEST_SCHEMA, TEST_TABLE);
+
+        SchemaBuilder schemaBuilder = createTestSchemaBuilder();
+        schemaBuilder.addField(FieldBuilder.newBuilder(COL, Types.MinorType.INT.getType()).build());
+        Schema schema = schemaBuilder.build();
+
+        Split split = createMockSplit(PARTITION_SCHEMA, PARTITION_NAME);
+        Constraints constraints = createConstraints(COL, getSingleValueSet(1));
+
+        Mockito.when(this.connection.prepareStatement(Mockito.anyString()))
+                .thenThrow(new SQLException("permission denied for table testTable", "42501"));
+
+        try {
+            this.postGreSqlRecordHandler.buildSplitSql(this.connection, TEST_CATALOG, tableName, schema, constraints, split);
+            Assert.fail("Expected AthenaConnectorException");
+        }
+        catch (AthenaConnectorException e) {
+            Assert.assertEquals(FederationSourceErrorCode.ACCESS_DENIED_EXCEPTION.toString(), e.getErrorDetails().errorCode());
+            Assert.assertTrue(e.getCause() instanceof SQLException);
+        }
     }
 
     @Test
