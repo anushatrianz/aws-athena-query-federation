@@ -63,6 +63,7 @@ import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 import org.mockito.junit.MockitoJUnitRunner;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueRequest;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
@@ -427,8 +428,17 @@ public class BigQueryMetadataHandlerTest
     @Test
     public void testDoGetQueryPassthroughSchema_WhenDisabled_ShouldThrowException() {
         GetTableRequest getTableRequest = getTableRequest(Collections.emptyMap());
-        Exception e = assertThrows(IllegalArgumentException.class, () ->
+        AthenaConnectorException e = assertThrows(AthenaConnectorException.class, () ->
                 bigQueryMetadataHandler.doGetQueryPassthroughSchema(blockAllocator, getTableRequest));
         assertTrue(e.getMessage().contains("No Query passed through"));
+        assertEquals(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString(), e.getErrorDetails().errorCode());
+    }
+
+    @Test
+    public void tooManyTablesException_defaultConstructor_hasInvalidInputErrorCode()
+    {
+        AthenaConnectorException e = new BigQueryExceptions.TooManyTablesException();
+        assertEquals(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString(), e.getErrorDetails().errorCode());
+        assertTrue(e.getMessage().contains("Too many tables"));
     }
 }

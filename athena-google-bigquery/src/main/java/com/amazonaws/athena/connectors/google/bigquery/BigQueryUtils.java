@@ -21,6 +21,7 @@
 package com.amazonaws.athena.connectors.google.bigquery;
 
 import com.amazonaws.athena.connector.lambda.data.DateTimeFormatterUtil;
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.amazonaws.athena.connector.lambda.security.CachableSecretsManager;
 import com.google.api.gax.paging.Page;
 import com.google.auth.Credentials;
@@ -45,6 +46,8 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.services.glue.model.ErrorDetails;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueRequest;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
@@ -81,23 +84,33 @@ public class BigQueryUtils
     }
 
     public static Credentials getCredentialsFromSecretsManager(java.util.Map<String, String> configOptions)
-            throws IOException
     {
         SecretsManagerClient secretsManager = SecretsManagerClient.create();
         GetSecretValueRequest getSecretValueRequest = GetSecretValueRequest.builder().secretId(getEnvBigQueryCredsSmId(configOptions)).build();
         GetSecretValueResponse response = secretsManager.getSecretValue(getSecretValueRequest);
-        return ServiceAccountCredentials.fromStream(new ByteArrayInputStream(response.secretString().getBytes())).createScoped(
-                ImmutableSet.of(BIGQUERY_SCOPE, DRIVE_SCOPE));
+        return getCredentialsFromSecret(response.secretString());
     }
 
+    /**
+     * Parses the service account JSON key. A secret that cannot be parsed is a credentials problem, so it is
+     * reported as InvalidCredentialsException. The parser message is kept only in the cause, because it can include
+     * parts of the secret.
+     */
     public static Credentials getCredentialsFromSecret(String secret)
-            throws IOException
     {
-        return ServiceAccountCredentials.fromStream(new ByteArrayInputStream(secret.getBytes())).createScoped(
-                ImmutableSet.of(BIGQUERY_SCOPE, DRIVE_SCOPE));
+        try {
+            return ServiceAccountCredentials.fromStream(new ByteArrayInputStream(secret.getBytes())).createScoped(
+                    ImmutableSet.of(BIGQUERY_SCOPE, DRIVE_SCOPE));
+        }
+        catch (IOException e) {
+            throw new AthenaConnectorException(
+                    "Unable to read the GCP service account credentials from the configured secret. Check that the secret contains a valid service account JSON key.",
+                    e,
+                    ErrorDetails.builder().errorCode(FederationSourceErrorCode.INVALID_CREDENTIALS_EXCEPTION.toString()).build());
+        }
     }
 
-    public static BigQuery getBigQueryClient(java.util.Map<String, String> configOptions) throws IOException
+    public static BigQuery getBigQueryClient(java.util.Map<String, String> configOptions)
     {
         BigQueryOptions.Builder bigqueryBuilder = BigQueryOptions.newBuilder();
         String endpoint = configOptions.get(BigQueryConstants.BIG_QUERY_ENDPOINT);
@@ -109,7 +122,7 @@ public class BigQueryUtils
         return bigqueryBuilder.build().getService();
     }
 
-    public static BigQuery getBigQueryClient(java.util.Map<String, String> configOptions, String secret) throws IOException
+    public static BigQuery getBigQueryClient(java.util.Map<String, String> configOptions, String secret)
     {
         BigQueryOptions.Builder bigqueryBuilder = BigQueryOptions.newBuilder();
         String endpoint = configOptions.get(BigQueryConstants.BIG_QUERY_ENDPOINT);
@@ -125,7 +138,8 @@ public class BigQueryUtils
     {
         String smid = configOptions.getOrDefault(BigQueryConstants.ENV_BIG_QUERY_CREDS_SM_ID, "");
         if (smid.isEmpty()) {
-            throw new RuntimeException(String.format("Configuration variable: %s not set", BigQueryConstants.ENV_BIG_QUERY_CREDS_SM_ID));
+            throw new AthenaConnectorException(String.format("Configuration variable: %s not set", BigQueryConstants.ENV_BIG_QUERY_CREDS_SM_ID),
+                    ErrorDetails.builder().errorCode(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString()).build());
         }
         return smid;
     }
@@ -139,20 +153,17 @@ public class BigQueryUtils
      */
     public static String fixCaseForDatasetName(String projectName, String datasetName, BigQuery bigQuery)
     {
-        try {
-            Page<Dataset> response = bigQuery.listDatasets(projectName);
-            for (Dataset dataset : response.iterateAll()) {
-                if (dataset.getDatasetId().getDataset().equalsIgnoreCase(datasetName)) {
-                    return dataset.getDatasetId().getDataset();
-                }
+        // BigQuery errors (permission denied, project not found, ...) are not caught here, so that
+        // BigQueryCompositeHandler can map them to the matching error code.
+        Page<Dataset> response = bigQuery.listDatasets(projectName);
+        for (Dataset dataset : response.iterateAll()) {
+            if (dataset.getDatasetId().getDataset().equalsIgnoreCase(datasetName)) {
+                return dataset.getDatasetId().getDataset();
             }
-            throw new IllegalArgumentException("Google Dataset with name " + datasetName +
-                    " could not be found in Project " + projectName + " in GCP. ");
         }
-        catch (Exception e) {
-            LOGGER.error("Error: ", e);
-        }
-        return null;
+        throw new AthenaConnectorException("Google Dataset with name " + datasetName +
+                " could not be found in Project " + projectName + " in GCP. ",
+                ErrorDetails.builder().errorCode(FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString()).build());
     }
 
     public static String fixCaseForTableName(String projectName, String datasetName, String tableName, BigQuery bigQuery)
@@ -163,8 +174,9 @@ public class BigQueryUtils
                 return table.getTableId().getTable();
             }
         }
-        throw new IllegalArgumentException("Google Table with name " + datasetName +
-                " could not be found in Project " + projectName + " in GCP. ");
+        throw new AthenaConnectorException("Google Table with name " + tableName +
+                " could not be found in Dataset " + datasetName + " of Project " + projectName + " in GCP. ",
+                ErrorDetails.builder().errorCode(FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString()).build());
     }
 
     static ArrowType translateToArrowType(LegacySQLTypeName type)

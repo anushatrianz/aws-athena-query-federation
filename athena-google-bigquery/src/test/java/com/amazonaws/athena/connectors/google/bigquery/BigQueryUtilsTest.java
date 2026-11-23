@@ -19,9 +19,11 @@
  */
 package com.amazonaws.athena.connectors.google.bigquery;
 
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.google.auth.Credentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.bigquery.BigQuery;
+import com.google.cloud.bigquery.BigQueryException;
 import com.google.cloud.bigquery.Dataset;
 import com.google.cloud.bigquery.DatasetId;
 import com.google.cloud.bigquery.Field;
@@ -40,7 +42,6 @@ import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.FieldType;
-import java.time.Instant;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -48,6 +49,7 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.MockitoJUnitRunner;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueRequest;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
@@ -65,8 +67,14 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
+
+
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -129,11 +137,61 @@ public class BigQueryUtilsTest
         assertEquals(expectedTableName, result);
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testFixCaseForTableNameNotFound()
     {
-        BigQueryUtils.fixCaseForTableName(
-                BigQueryTestUtils.PROJECT_1_NAME, datasetName, "nonexistent", bigQuery);
+        AthenaConnectorException e = assertThrows(AthenaConnectorException.class, () ->
+                BigQueryUtils.fixCaseForTableName(BigQueryTestUtils.PROJECT_1_NAME, datasetName, "nonexistent", bigQuery));
+        assertEquals(FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString(), e.getErrorDetails().errorCode());
+        assertTrue(e.getMessage().contains("Google Table with name nonexistent"));
+    }
+
+    @Test
+    public void fixCaseForDatasetName_datasetMissing_throwsEntityNotFound()
+    {
+        AthenaConnectorException e = assertThrows(AthenaConnectorException.class, () ->
+                BigQueryUtils.fixCaseForDatasetName(BigQueryTestUtils.PROJECT_1_NAME, "testDataset", bigQuery));
+        assertEquals(FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString(), e.getErrorDetails().errorCode());
+        assertTrue(e.getMessage().contains("Google Dataset with name testDataset"));
+    }
+
+    @Test
+    public void fixCaseForDatasetName_listDatasetsFails_propagatesBigQueryException()
+    {
+        // The error must reach BigQueryCompositeHandler so it can be mapped, not be swallowed.
+        BigQueryException failure = new BigQueryException(403, "Access Denied: Project test");
+        when(bigQuery.listDatasets(nullable(String.class))).thenThrow(failure);
+
+        BigQueryException thrown = assertThrows(BigQueryException.class, () ->
+                BigQueryUtils.fixCaseForDatasetName(BigQueryTestUtils.PROJECT_1_NAME, datasetName, bigQuery));
+        assertSame(failure, thrown);
+    }
+
+    @Test
+    public void getCredentialsFromSecret_unparsableSecret_throwsInvalidCredentials() throws IOException
+    {
+        when(ServiceAccountCredentials.fromStream(any())).thenThrow(new IOException("parser detail"));
+
+        AthenaConnectorException e = assertThrows(AthenaConnectorException.class, () ->
+                BigQueryUtils.getCredentialsFromSecret("not-a-json-key"));
+        assertEquals(FederationSourceErrorCode.INVALID_CREDENTIALS_EXCEPTION.toString(), e.getErrorDetails().errorCode());
+        // The parser message can contain parts of the secret, so it is kept only in the cause.
+        assertFalse(e.getMessage().contains("parser detail"));
+        assertEquals("parser detail", e.getCause().getMessage());
+    }
+
+    @Test
+    public void getCredentialsFromSecretsManager_unparsableSecret_throwsInvalidCredentials() throws IOException
+    {
+        configOptions.put(BigQueryConstants.ENV_BIG_QUERY_CREDS_SM_ID, CREDS_SM_NAME);
+        when(SecretsManagerClient.create()).thenReturn(secretsManagerClient);
+        when(secretsManagerClient.getSecretValue(any(GetSecretValueRequest.class)))
+                .thenReturn(GetSecretValueResponse.builder().secretString("not-a-json-key").build());
+        when(ServiceAccountCredentials.fromStream(any())).thenThrow(new IOException("parser detail"));
+
+        AthenaConnectorException e = assertThrows(AthenaConnectorException.class, () ->
+                BigQueryUtils.getCredentialsFromSecretsManager(configOptions));
+        assertEquals(FederationSourceErrorCode.INVALID_CREDENTIALS_EXCEPTION.toString(), e.getErrorDetails().errorCode());
     }
 
     @Test
@@ -443,16 +501,6 @@ public class BigQueryUtilsTest
         BigQueryUtils.getObjectFromFieldValue(FIELD_NAME, testValue, customField);
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void bigQueryUtils()
-    {
-        String newDatasetName = BigQueryUtils.fixCaseForDatasetName(BigQueryTestUtils.PROJECT_1_NAME, "testDataset", bigQuery);
-        assertNull(newDatasetName);
-
-        String tableName = BigQueryUtils.fixCaseForTableName(BigQueryTestUtils.PROJECT_1_NAME, datasetName, "test", bigQuery);
-        assertNull(tableName);
-    }
-
     @Test
     public void testGetCredentialsFromSecret() {
         try {
@@ -484,11 +532,14 @@ public class BigQueryUtilsTest
         assertNotNull(result);
     }
 
-    @Test(expected = RuntimeException.class)
+    @Test
     public void testGetEnvBigQueryCredsSmIdEmpty()
     {
         java.util.Map<String, String> configOptions = new java.util.HashMap<>();
-        BigQueryUtils.getEnvBigQueryCredsSmId(configOptions);
+        AthenaConnectorException e = assertThrows(AthenaConnectorException.class, () ->
+                BigQueryUtils.getEnvBigQueryCredsSmId(configOptions));
+        assertEquals(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString(), e.getErrorDetails().errorCode());
+        assertTrue(e.getMessage().contains(BigQueryConstants.ENV_BIG_QUERY_CREDS_SM_ID));
     }
 
     @Test

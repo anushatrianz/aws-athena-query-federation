@@ -28,6 +28,7 @@ import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.functions.StandardFunctions;
 import com.amazonaws.athena.connector.lambda.domain.spill.SpillLocation;
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.amazonaws.athena.connector.lambda.handlers.MetadataHandler;
 import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesResponse;
@@ -69,6 +70,8 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.athena.AthenaClient;
+import software.amazon.awssdk.services.glue.model.ErrorDetails;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 
 import java.io.IOException;
@@ -205,7 +208,8 @@ public class BigQueryMetadataHandler
     public GetTableResponse doGetQueryPassthroughSchema(BlockAllocator allocator, GetTableRequest request) throws Exception
     {
         if (!request.isQueryPassthrough()) {
-            throw new IllegalArgumentException("No Query passed through [{}]" + request);
+            throw new AthenaConnectorException("No Query passed through for table " + request.getTableName(),
+                    ErrorDetails.builder().errorCode(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString()).build());
         }
         queryPassthrough.verify(request.getQueryPassthroughArguments());
         String query = request.getQueryPassthroughArguments().get(BigQueryQueryPassthrough.QUERY);
@@ -217,7 +221,8 @@ public class BigQueryMetadataHandler
         Job job = bigquery.create(JobInfo.of(queryConfig));
         JobStatistics.QueryStatistics statistics = job.getStatistics();
         if (!statistics.getStatementType().equals(SELECT)) {
-            throw new IllegalArgumentException("Unsupported statement type: " + statistics.getStatementType());
+            throw new AthenaConnectorException("Unsupported statement type: " + statistics.getStatementType(),
+                    ErrorDetails.builder().errorCode(FederationSourceErrorCode.OPERATION_NOT_SUPPORTED_EXCEPTION.toString()).build());
         }
         com.google.cloud.bigquery.Schema bigQuerySchema = statistics.getSchema();
         SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();

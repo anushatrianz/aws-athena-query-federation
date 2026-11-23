@@ -21,14 +21,19 @@
 
 package com.amazonaws.athena.connectors.google.bigquery;
 
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
+import software.amazon.awssdk.services.glue.model.ErrorDetails;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
+
 public class BigQueryExceptions
 {
     static class TooManyTablesException
-            extends RuntimeException
+            extends AthenaConnectorException
     {
         TooManyTablesException()
         {
-            super("Too many tables, exceeded max metadata results for schema count.");
+            super("Too many tables, exceeded max metadata results for schema count.",
+                    ErrorDetails.builder().errorCode(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString()).build());
         }
     }
 }
