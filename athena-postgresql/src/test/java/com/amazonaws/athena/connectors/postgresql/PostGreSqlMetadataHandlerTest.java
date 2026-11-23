@@ -27,6 +27,7 @@ import com.amazonaws.athena.connector.lambda.data.FieldBuilder;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.spill.S3SpillLocation;
 import com.amazonaws.athena.connector.lambda.domain.spill.SpillLocation;
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.amazonaws.athena.connector.lambda.metadata.MetadataRequest;
 import java.util.UUID;
 import com.amazonaws.athena.connector.lambda.domain.Split;
@@ -75,6 +76,7 @@ import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.athena.AthenaClient;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueRequest;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
@@ -1255,6 +1257,21 @@ public class PostGreSqlMetadataHandlerTest
         Assert.assertEquals("\"order_id\"", postGreSqlMetadataHandler.wrapNameWithEscapedCharacter("order_id"));
         Assert.assertEquals("\"a\"\"b\"", postGreSqlMetadataHandler.wrapNameWithEscapedCharacter("a\"b"));
         Assert.assertEquals("\"x\"\");--\"", postGreSqlMetadataHandler.wrapNameWithEscapedCharacter("x\");--"));
+    }
+
+    /**
+     * PostgreSQL forbids a NUL byte in an identifier, so the driver's escaper throws. That failure is reported as
+     * InvalidInputException instead of a plain RuntimeException, and the driver's SQLException is kept as the cause.
+     */
+    @Test
+    public void wrapNameWithEscapedCharacter_nulByte_throwsInvalidInput()
+    {
+        AthenaConnectorException e = assertThrows(AthenaConnectorException.class, () ->
+                postGreSqlMetadataHandler.wrapNameWithEscapedCharacter("bad\u0000name"));
+
+        assertEquals(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString(), e.getErrorDetails().errorCode());
+        assertTrue(e.getMessage().startsWith("Unable to escape SQL identifier"));
+        assertTrue(e.getCause() instanceof SQLException);
     }
 
     /**

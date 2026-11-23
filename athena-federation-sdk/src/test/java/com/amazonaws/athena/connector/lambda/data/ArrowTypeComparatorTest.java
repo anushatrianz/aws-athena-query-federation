@@ -220,7 +220,7 @@ public class ArrowTypeComparatorTest {
                 AthenaConnectorException.class,
                 () -> ArrowTypeComparator.compare(unsupportedType, struct1, struct2)
         );
-        assertEquals("Unknown type INTERVALYEAR object: class java.util.HashMap", exception.getMessage());
+        assertEquals("Unknown type INTERVALYEAR object: class java.util.HashMap [InvalidInputException]", exception.getMessage());
     }
 
     @Test
@@ -229,7 +229,7 @@ public class ArrowTypeComparatorTest {
                 AthenaConnectorException.class,
                 () -> ArrowTypeComparator.compare(unsupportedType, "lhs", "rhs")
         );
-        assertEquals("Unknown type INTERVALYEAR object: class java.lang.String", exception.getMessage());
+        assertEquals("Unknown type INTERVALYEAR object: class java.lang.String [InvalidInputException]", exception.getMessage());
     }
 
     @Test

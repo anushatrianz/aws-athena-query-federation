@@ -30,6 +30,8 @@ public class AthenaConnectorExceptionTest
 {
     private static final String errorMessage = "Test Message";
     private static final String errorCode = "TestErrorCode";
+    // getMessage() appends the error code, so Athena shows it to the user.
+    private static final String errorMessageWithCode = errorMessage + " [" + errorCode + "]";
     private static final Object testResponse = "Test Response";
     private static final Exception testCause = new RuntimeException("Test Cause");
 
@@ -57,7 +59,7 @@ public class AthenaConnectorExceptionTest
     {
         AthenaConnectorException exception = new AthenaConnectorException(testResponse, errorMessage, errorDetails);
 
-        assertEquals(errorMessageMatchMsg, errorMessage, exception.getMessage());
+        assertEquals(errorMessageMatchMsg, errorMessageWithCode, exception.getMessage());
         assertEquals(responseMatchMsg, testResponse, exception.getResponse());
         assertEquals(errorDetailsMatchMsg, errorDetails, exception.getErrorDetails());
         assertNull(causeNullMsg, exception.getCause());
@@ -68,7 +70,7 @@ public class AthenaConnectorExceptionTest
     {
         AthenaConnectorException exception = new AthenaConnectorException(errorMessage, errorDetails);
 
-        assertEquals(errorMessageMatchMsg, errorMessage, exception.getMessage());
+        assertEquals(errorMessageMatchMsg, errorMessageWithCode, exception.getMessage());
         assertNull(responseNullMsg, exception.getResponse());
         assertEquals(errorDetailsMatchMsg, errorDetails, exception.getErrorDetails());
         assertNull(causeNullMsg, exception.getCause());
@@ -79,9 +81,46 @@ public class AthenaConnectorExceptionTest
     {
         AthenaConnectorException exception = new AthenaConnectorException(testResponse, errorMessage, testCause, errorDetails);
 
-        assertEquals(errorMessageMatchMsg, errorMessage, exception.getMessage());
+        assertEquals(errorMessageMatchMsg, errorMessageWithCode, exception.getMessage());
         assertEquals(causeMatchMsg, testCause, exception.getCause());
         assertEquals(responseMatchMsg, testResponse, exception.getResponse());
         assertEquals(errorDetailsMatchMsg, errorDetails, exception.getErrorDetails());
+    }
+
+    @Test
+    public void constructor_withMessageCauseAndErrorDetails_shouldSetFieldsCorrectly()
+    {
+        AthenaConnectorException exception = new AthenaConnectorException(errorMessage, testCause, errorDetails);
+
+        assertEquals(errorMessageMatchMsg, errorMessageWithCode, exception.getMessage());
+        assertEquals(causeMatchMsg, testCause, exception.getCause());
+        assertNull(responseNullMsg, exception.getResponse());
+        assertEquals(errorDetailsMatchMsg, errorDetails, exception.getErrorDetails());
+    }
+
+    @Test
+    public void getMessage_withErrorCode_shouldAppendErrorCode()
+    {
+        AthenaConnectorException exception = new AthenaConnectorException(errorMessage, errorDetails);
+
+        assertEquals("Test Message [TestErrorCode]", exception.getMessage());
+    }
+
+    @Test
+    public void getMessage_withoutErrorCode_shouldReturnMessageUnchanged()
+    {
+        ErrorDetails detailsWithoutCode = ErrorDetails.builder().errorMessage(errorMessage).build();
+        AthenaConnectorException exception = new AthenaConnectorException(errorMessage, detailsWithoutCode);
+
+        assertEquals(errorMessage, exception.getMessage());
+    }
+
+    @Test
+    public void getLocalizedMessage_withErrorCode_shouldIncludeErrorCode()
+    {
+        // Athena reports the Lambda error using the localized message, which defaults to getMessage().
+        AthenaConnectorException exception = new AthenaConnectorException(errorMessage, errorDetails);
+
+        assertEquals(errorMessageWithCode, exception.getLocalizedMessage());
     }
 }
