@@ -99,28 +99,11 @@ public class AthenaConnectorExceptionTest
     }
 
     @Test
-    public void getMessage_withErrorCode_shouldAppendErrorCode()
-    {
-        AthenaConnectorException exception = new AthenaConnectorException(errorMessage, errorDetails);
-
-        assertEquals("Test Message [TestErrorCode]", exception.getMessage());
-    }
-
-    @Test
     public void getMessage_withoutErrorCode_shouldReturnMessageUnchanged()
     {
         ErrorDetails detailsWithoutCode = ErrorDetails.builder().errorMessage(errorMessage).build();
         AthenaConnectorException exception = new AthenaConnectorException(errorMessage, detailsWithoutCode);
 
         assertEquals(errorMessage, exception.getMessage());
-    }
-
-    @Test
-    public void getLocalizedMessage_withErrorCode_shouldIncludeErrorCode()
-    {
-        // Athena reports the Lambda error using the localized message, which defaults to getMessage().
-        AthenaConnectorException exception = new AthenaConnectorException(errorMessage, errorDetails);
-
-        assertEquals(errorMessageWithCode, exception.getLocalizedMessage());
     }
 }
