@@ -75,7 +75,7 @@ public class NeptuneSparqlQueryPassthroughTest {
             queryPassthrough.verify(new HashMap<>());
             fail("Expected AthenaConnectorException");
         } catch (AthenaConnectorException e) {
-            assertEquals("Function Signature doesn't match implementation's", e.getMessage());
+            assertEquals("Function Signature doesn't match implementation's [InvalidInputException]", e.getMessage());
         }
     }
 
@@ -87,7 +87,7 @@ public class NeptuneSparqlQueryPassthroughTest {
             queryPassthrough.verify(baseArguments);
             fail("Expected AthenaConnectorException");
         } catch (AthenaConnectorException e) {
-            assertEquals("Missing Query Passthrough Argument: " + DATABASE, e.getMessage());
+            assertEquals("Missing Query Passthrough Argument: " + DATABASE + " [InvalidInputException]", e.getMessage());
         }
     }
 
@@ -99,7 +99,7 @@ public class NeptuneSparqlQueryPassthroughTest {
             queryPassthrough.verify(baseArguments);
             fail("Expected AthenaConnectorException");
         } catch (AthenaConnectorException e) {
-            assertEquals("Missing Query Passthrough Argument: " + COLLECTION, e.getMessage());
+            assertEquals("Missing Query Passthrough Argument: " + COLLECTION + " [InvalidInputException]", e.getMessage());
         }
     }
 
@@ -111,7 +111,7 @@ public class NeptuneSparqlQueryPassthroughTest {
             queryPassthrough.verify(baseArguments);
             fail("Expected AthenaConnectorException");
         } catch (AthenaConnectorException e) {
-            assertEquals("Missing Query Passthrough Argument: " + QUERY, e.getMessage());
+            assertEquals("Missing Query Passthrough Argument: " + QUERY + " [InvalidInputException]", e.getMessage());
         }
     }
 
@@ -123,7 +123,7 @@ public class NeptuneSparqlQueryPassthroughTest {
             queryPassthrough.verify(baseArguments);
             fail("Expected AthenaConnectorException");
         } catch (AthenaConnectorException e) {
-            assertEquals("Mixed operations not supported: Cannot use both SPARQL query and Gremlin traverse in the same request", e.getMessage());
+            assertEquals("Mixed operations not supported: Cannot use both SPARQL query and Gremlin traverse in the same request [InvalidInputException]", e.getMessage());
         }
     }
 } 

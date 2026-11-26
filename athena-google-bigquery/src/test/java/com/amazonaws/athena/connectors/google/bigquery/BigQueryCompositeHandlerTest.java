@@ -114,7 +114,7 @@ public class BigQueryCompositeHandlerTest
         AthenaConnectorException athenaException = (AthenaConnectorException) result;
         assertEquals(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString(),
                 athenaException.getErrorDetails().errorCode());
-        assertEquals("Invalid query", athenaException.getMessage());
+        assertEquals("Invalid query [InvalidInputException]", athenaException.getMessage());
     }
 
     // JobException Tests
@@ -141,7 +141,7 @@ public class BigQueryCompositeHandlerTest
         AthenaConnectorException athenaException = (AthenaConnectorException) result;
         assertEquals(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString(),
                 athenaException.getErrorDetails().errorCode());
-        assertEquals("SQL syntax error", athenaException.getMessage());
+        assertEquals("SQL syntax error [InvalidInputException]", athenaException.getMessage());
     }
 
     // Non-BigQuery Exception Tests

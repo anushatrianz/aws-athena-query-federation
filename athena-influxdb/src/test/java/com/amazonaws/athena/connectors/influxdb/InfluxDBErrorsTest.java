@@ -51,7 +51,7 @@ public class InfluxDBErrorsTest
         final AthenaConnectorException e =
                 InfluxDBErrors.error(FederationSourceErrorCode.INTERNAL_SERVICE_EXCEPTION, "request failed", cause);
         assertErrorCode(FederationSourceErrorCode.INTERNAL_SERVICE_EXCEPTION, e);
-        assertEquals("request failed", e.getMessage());
+        assertEquals("request failed [InternalServiceException]", e.getMessage());
         assertSame(cause, e.getCause());
         assertEquals("connection reset", e.getErrorDetails().errorMessage());
     }

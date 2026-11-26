@@ -473,7 +473,7 @@ public class JdbcRecordHandlerTest
             this.jdbcRecordHandler.makeExtractor(unsupportedField, resultSet, partitionMap);
             Assert.fail("Expected AthenaConnectorException for unsupported type LIST");
         } catch (AthenaConnectorException e) {
-            Assert.assertEquals("Unhandled type LIST", e.getMessage());
+            Assert.assertEquals("Unhandled type LIST [OperationNotSupportedException]", e.getMessage());
             Assert.assertEquals(FederationSourceErrorCode.OPERATION_NOT_SUPPORTED_EXCEPTION.toString(), e.getErrorDetails().errorCode());
         }
     }

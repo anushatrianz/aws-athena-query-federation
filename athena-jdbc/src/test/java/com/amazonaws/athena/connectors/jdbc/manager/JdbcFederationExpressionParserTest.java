@@ -90,7 +90,7 @@ public class JdbcFederationExpressionParserTest
                 ATHENA_EXCEPTION,
                 () -> parser.mapFunctionToDataSourceSyntax(new FunctionName(functionName), null, arguments)
         );
-        assertEquals(expectedMessage, ex.getMessage());
+        assertEquals(expectedMessage + " [InvalidInputException]", ex.getMessage());
     }
 
     @Test
